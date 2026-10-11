@@ -1,0 +1,16 @@
+const photo=(id)=>`https://images.unsplash.com/${id}?auto=format&fit=crop&w=550&q=80`;
+export const initialProducts=[
+{id:'bayam',name:'Bayam Hijau',unit:'1 ikat · ±200 g',price:5000,category:'Sayuran',image:photo('photo-1576045057995-568f588f82fb'),tag:'Favorit tetangga'},
+{id:'wortel',name:'Wortel Segar',unit:'1 bungkus · 500 g',price:8000,category:'Sayuran',image:photo('photo-1445282768818-728615cc910a'),tag:'Pilihan hari ini'},
+{id:'tomat',name:'Tomat Merah',unit:'1 bungkus · 500 g',price:9000,category:'Sayuran',image:photo('photo-1546094096-0df4bcaaa337'),tag:''},
+{id:'brokoli',name:'Brokoli Hijau',unit:'1 bonggol · ±300 g',price:12000,category:'Sayuran',image:photo('photo-1459411621453-7b03977f4bfc'),tag:'Segar dari pasar'},
+{id:'pisang',name:'Pisang Cavendish',unit:'1 sisir kecil · ±700 g',price:18000,category:'Buah',image:photo('photo-1571771894821-ce9b6c11b08e'),tag:'Manis alami'},
+{id:'jeruk',name:'Jeruk Manis',unit:'1 bungkus · 500 g',price:15000,category:'Buah',image:photo('photo-1547514701-42782101795e'),tag:''},
+{id:'ayam',name:'Ayam Potong',unit:'1 porsi · ±500 g',price:22000,category:'Lauk',image:photo('photo-1604503468506-a8da13d82791'),tag:'Bisa minta dipotong'},
+{id:'telur',name:'Telur Ayam',unit:'1 paket · 6 butir',price:14000,category:'Dapur',image:photo('photo-1506976785307-8732e854ad03'),tag:'Stok dapur'},
+{id:'ikan',name:'Ikan Segar',unit:'1 porsi · ±500 g',price:25000,category:'Lauk',image:photo('photo-1510130387422-82bed34b37e9'),tag:'Jenis dikonfirmasi'},
+{id:'kentang',name:'Kentang',unit:'1 bungkus · 500 g',price:10000,category:'Sayuran',image:photo('photo-1518977676601-b53f82aba655'),tag:''},
+{id:'alpukat',name:'Alpukat',unit:'1 porsi · ±500 g',price:18000,category:'Buah',image:photo('photo-1523049673857-eb18f1d7b578'),tag:''},
+{id:'cabai',name:'Cabai Merah',unit:'1 bungkus · 100 g',price:7000,category:'Dapur',image:photo('photo-1588252303782-cb80119abd6d'),tag:''}
+];
+

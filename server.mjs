@@ -1,6 +1,9 @@
 import http from 'node:http';
-import {readFile} from 'node:fs/promises';
-import {resolve,extname,sep} from 'node:path';
-const root=resolve('dist');
-const mime={'.html':'text/html; charset=utf-8','.js':'text/javascript','.css':'text/css','.svg':'image/svg+xml','.webmanifest':'application/manifest+json','.png':'image/png'};
-http.createServer(async(req,res)=>{try{const path=resolve(root,'.'+decodeURIComponent(new URL(req.url,'http://localhost').pathname));if(path!==root&&!path.startsWith(root+sep)){res.writeHead(403).end();return;}const file=path===root?resolve(root,'index.html'):path;const data=await readFile(file);res.writeHead(200,{'Content-Type':mime[extname(file)]||'application/octet-stream','Cache-Control':'no-cache'});res.end(data);}catch{res.writeHead(404).end('Not found');}}).listen(3000,'0.0.0.0',()=>console.log('Local: http://localhost:3000'));
+import {readFile,mkdir} from 'node:fs/promises';
+import {createDB} from './scripts/local-db.mjs';
+import {handle} from './worker/api.js';
+await mkdir('.local',{recursive:true});
+const db=createDB('.local/hemart.sqlite');
+const env={DB:db,SELLER_EMAILS:'local-seller@example.invalid'};
+const mime={html:'text/html; charset=utf-8',css:'text/css',js:'text/javascript',svg:'image/svg+xml',png:'image/png',webmanifest:'application/manifest+json'};
+http.createServer(async(req,res)=>{try{const url=new URL(req.url,'http://localhost:3000');const headers=new Headers();for(const [key,value] of Object.entries(req.headers))if(!key.startsWith('oai-')&&value)headers.set(key,Array.isArray(value)?value.join(','):value);if(process.env.DEV_SELLER==='1'){headers.set('oai-authenticated-user-id','local-seller');headers.set('oai-authenticated-user-email','local-seller@example.invalid');}let raw='';for await(const chunk of req){raw+=chunk;if(raw.length>20000){res.writeHead(413).end();return;}}let assets={};if(!url.pathname.startsWith('/api/')){const filename=url.pathname==='/'?'index.html':url.pathname.slice(1);if(!/^[a-zA-Z0-9.-]+$/.test(filename)){res.writeHead(404).end();return;}try{assets[url.pathname]={type:mime[filename.split('.').pop()],data:(await readFile('public/'+filename)).toString('base64')};}catch{res.writeHead(404).end();return;}}const request=new Request(url,{method:req.method,headers,...(!['GET','HEAD'].includes(req.method)?{body:raw}:{})});const response=await handle(request,env,assets);res.writeHead(response.status,Object.fromEntries(response.headers));res.end(Buffer.from(await response.arrayBuffer()));}catch(error){console.error(error.message);res.writeHead(500).end('Server error');}}).listen(3000,'127.0.0.1',()=>console.log('Local: http://localhost:3000 · '+(process.env.DEV_SELLER==='1'?'LOCAL seller preview':'Guest preview')));
