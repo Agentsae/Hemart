@@ -18,6 +18,8 @@ Edit `public/` for the UI, `worker/api.js` for the API, and `worker/catalog.js` 
 
 ## Access and launch
 
+Customer storefront: `/`. Seller dashboard: `/seller` (no seller link on the storefront). The server redirects unauthenticated dashboard requests to sign-in and denies non-seller accounts. Legacy `/#seller` bookmarks redirect to `/seller`.
+
 - Seller access uses verified Sites identity headers and the production `SELLER_EMAILS` allowlist configured through Sites runtime settings. A WhatsApp number is contact information, not an authentication credential.
 - Customers can order without an account when the Site audience permits anonymous access. The current Site remains owner-private until its audience is explicitly changed.
 - Guest receipts use a random 256-bit capability. Only its SHA-256 hash is stored in D1. The receipt link uses a URL fragment, then removes it from the address bar after importing. Anyone with the private link can view/approve/cancel that order; do not share publicly. Receipt keys are kept in browser storage for order history.

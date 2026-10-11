@@ -2,6 +2,7 @@ hemart-site.*
 node_modules/
 .sites-runtime/
 hemart-preview.png
+hemart-seller-preview.png
 .env*
 !.env.example
 .local/
