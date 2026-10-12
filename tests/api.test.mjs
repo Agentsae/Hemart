@@ -2,8 +2,11 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {handle,defaults,schedule,validateSettings} from '../worker/api.js';
 import {createDB} from '../scripts/local-db.mjs';
+import {passwordHash} from '../worker/auth.js';
+const testPassword='local-test-passphrase-123';
+const testHash=await passwordHash(testPassword);
 const origin='https://hemart.test';
-function setup(){const DB=createDB();const env={DB,SELLER_EMAILS:'seller@example.test'};async function request(path,method='GET',body,options={}){const headers={'Content-Type':'application/json',Origin:options.origin||origin};if(options.seller){headers['oai-authenticated-user-id']='seller-id';headers['oai-authenticated-user-email']='seller@example.test';}if(options.token)headers['X-Receipt-Token']=options.token;const response=await handle(new Request(origin+path,{method,headers,...(body?{body:JSON.stringify(body)}:{})}),env);return {status:response.status,body:await response.json(),headers:response.headers};}return {DB,request};}
+function setup(){const DB=createDB();const env={DB,SELLER_USERNAME:'bapak',SELLER_PASSWORD_HASH:testHash};let cookie='';async function request(path,method='GET',body,options={}){const headers={'Content-Type':'application/json',Origin:options.origin||origin};if(options.seller){if(!cookie){const login=await handle(new Request(origin+'/api/auth/login',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify({username:'bapak',password:testPassword})}),env);cookie=login.headers.get('Set-Cookie').split(';')[0];}headers.Cookie=cookie;}if(options.token)headers['X-Receipt-Token']=options.token;const response=await handle(new Request(origin+path,{method,headers,...(body?{body:JSON.stringify(body)}:{})}),env);return {status:response.status,body:await response.json(),headers:response.headers};}return {DB,request};}
 const token=()=>Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url');
 const payload=()=>({name:'Test Customer',phone:'081234567890',address:'Test address block A no 12',area:'Perum Megaregency',notes:'',substitution:'Hubungi saya terlebih dahulu',delivery:schedule(),deliveryFee:0,items:[{id:'bayam',qty:2,price:5000}]});
 async function opened(){const x=setup();assert.equal((await x.request('/api/seller/settings','PUT',{...defaults,open:true},{seller:true})).status,200);return x;}
@@ -15,15 +18,3 @@ test('changed quote needs customer approval, then packing, delivery and payment'
 test('unavailable products and stale delivery date are rejected',async()=>{const {request}=await opened();let product=(await request('/api/bootstrap')).body.products[0];await request('/api/seller/products/'+product.id,'PUT',{...product,available:false},{seller:true});assert.equal((await request('/api/orders','POST',payload(),{token:token()})).status,400);assert.equal((await request('/api/orders','POST',{...payload(),delivery:'2020-01-01'},{token:token()})).status,409);});
 test('settings support blank WhatsApp and protect configuration ranges',()=>{assert.equal(validateSettings(defaults).whatsapp,'');assert.throws(()=>validateSettings({...defaults,capacity:0}));assert.throws(()=>validateSettings({...defaults,deliveryFee:-1}));});
 test('cutoff uses Jakarta time including year boundaries',()=>{assert.equal(schedule(new Date('2026-12-31T13:59:59Z')),'2027-01-01');assert.equal(schedule(new Date('2026-12-31T14:00:00Z')),'2027-01-02');});
-test('seller page requires verified seller identity before serving dashboard shell',async()=>{
- const assets={'/':{type:'text/html',data:btoa('<h1>Dashboard shell</h1>')}};
- const env={SELLER_EMAILS:'seller@example.test'};
- const anonymous=await handle(new Request(origin+'/seller'),env,assets);
- assert.equal(anonymous.status,302);assert.equal(anonymous.headers.get('Location'),'/signin-with-chatgpt?return_to=%2Fseller');
- const buyer=await handle(new Request(origin+'/seller',{headers:{'oai-authenticated-user-id':'buyer','oai-authenticated-user-email':'buyer@example.test'}}),env,assets);
- assert.equal(buyer.status,403);assert.ok(!(await buyer.text()).includes('Dashboard shell'));
- const forgedEmail=await handle(new Request(origin+'/seller',{headers:{'oai-authenticated-user-email':'seller@example.test'}}),env,assets);assert.equal(forgedEmail.status,302);
- const headers={'oai-authenticated-user-id':'owner','oai-authenticated-user-email':'seller@example.test'};
- const owner=await handle(new Request(origin+'/seller',{headers}),env,assets);assert.equal(owner.status,200);assert.match(await owner.text(),/Dashboard shell/);
- const slash=await handle(new Request(origin+'/seller/',{headers}),env,assets);assert.equal(slash.headers.get('Location'),'/seller');
-});

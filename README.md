@@ -1,41 +1,40 @@
 # Hemart
 
-An Indonesian neighborhood-grocery PWA for Perum Megaregency. Cloudflare Worker backend with persistent D1 storage; responsive vanilla-JavaScript storefront. No runtime package dependencies.
+Independent grocery PWA for Perum Megaregency, with free delivery, evening preorders, a customer storefront, and a separate `/seller` dashboard. Deploy it to your own Cloudflare account; a custom domain is optional. Neither customers nor sellers need ChatGPT.
 
-## Run and verify
+## Development
 
-Node 22.13+ is required for the local SQLite adapter.
+Use Node 22.13+ and run:
 
 ```
+npm ci
+npm run seller:setup
 npm run dev
+```
+
+The setup command asks you for a local seller username and a long password using hidden input. Open http://localhost:3000 for shopping or http://localhost:3000/seller for seller login. Local SQLite data lives in `.local/hemart.sqlite`; local credentials live in `.dev.vars`. Both are ignored by Git. There is no automatic seller-login bypass.
+
+```
 npm test
 npm run build
+npm run deploy:check
 ```
 
-Local preview: http://localhost:3000. The local database is `.local/hemart.sqlite`, excluded from Git and deployment. To test the seller locally in PowerShell, run `$env:DEV_SELLER='1'` before `npm run dev`. This affects the loopback-only local server; the deployed Worker never implements this bypass.
+`public/` contains the interface, `worker/` contains API/authentication code, `drizzle/` contains append-only schema migrations, and `wrangler.json` configures independent hosting. The build embeds the public files into `dist/server/index.js`. The old `.openai/hosting.json` records the legacy ChatGPT demo only; the independent build and deployment do not use it. The old hosted demo is not modified by these changes.
 
-Edit `public/` for the UI, `worker/api.js` for the API, and `worker/catalog.js` for initial catalog entries. `scripts/build.mjs` embeds public assets into `dist/server/index.js`. `dist/` is generated output and the hosting manifest selects the Worker. Schema migrations are in `drizzle/`; applied migrations must not be modified. The Sites publisher provisions the `DB` binding and applies migrations.
+## Production
 
-## Access and launch
+See [DEPLOYMENT.md](DEPLOYMENT.md). First create your own Cloudflare account, create a D1 database, configure its returned ID, deploy, and set the production seller credentials. Until the seller credentials are configured, seller login fails closed. Until the seller opens the store, checkout is paused. No customer data, settings, or credentials from the ChatGPT demo are automatically transferred to the new database.
 
-Customer storefront: `/`. Seller dashboard: `/seller` (no seller link on the storefront). The server redirects unauthenticated dashboard requests to sign-in and denies non-seller accounts. Legacy `/#seller` bookmarks redirect to `/seller`.
+## Features
 
-- Seller access uses verified Sites identity headers and the production `SELLER_EMAILS` allowlist configured through Sites runtime settings. A WhatsApp number is contact information, not an authentication credential.
-- Customers can order without an account when the Site audience permits anonymous access. The current Site remains owner-private until its audience is explicitly changed.
-- Guest receipts use a random 256-bit capability. Only its SHA-256 hash is stored in D1. The receipt link uses a URL fragment, then removes it from the address bar after importing. Anyone with the private link can view/approve/cancel that order; do not share publicly. Receipt keys are kept in browser storage for order history.
-- Private API responses are never cached. Offline mode keeps the shell, last public catalog and cart; it does not silently queue orders. Failed checkout retries reuse the same idempotency token. A pending checkout remains on the device until its outcome is resolved.
-- Default service area: **Perum Megaregency**. Delivery: **Rp0**. Cutoff: **21:00 Asia/Jakarta**; delivery starts **06:00** along the route. Default capacity: 20 orders per delivery date. These settings are editable.
-- The WhatsApp field is intentionally blank. The customer contact button remains hidden until a valid number is entered. WhatsApp buttons only open a conversation; no automatic messages or notifications are sent.
-- Ordering starts paused. In **Dashboard penjual → Produk & harga**, replace illustrative prices and check availability. Then open orders under **Pengaturan toko**. Pausing orders does not prevent processing existing orders.
+- Product categories/search, persistent cart, account-free checkout, private receipt links, reorder, and pre-packing cancellation.
+- Server-side pricing, availability checks, Jakarta cutoff handling, atomic daily order capacity, and idempotent checkout retries.
+- Seller orders, packing/preparation lists, delivery stages, cash payment tracking, product editing, availability and delivery settings.
+- Changed totals and weight/substitution notes require customer approval before packing.
+- Separate seller login with salted password derivation, random database-backed sessions, HttpOnly/Secure/SameSite cookies, logout revocation, credential-rotation invalidation and login throttling. Production credentials are Cloudflare secrets; passwords are never stored in plaintext. This is a single seller account, not a multi-staff role system.
+- PWA manifest and offline app shell/catalog/cart. Creating or changing orders requires an internet connection. Private API responses and seller pages are not cached by the service worker.
 
-## Order flow
+Default settings: Perum Megaregency, Rp0 delivery, 21:00 WIB cutoff, delivery from 06:00, 20 orders per delivery date, blank WhatsApp number, and checkout paused pending real product/price review. Settings are editable from the seller dashboard. WhatsApp buttons open a conversation; they do not send automatic messages. Cash on delivery is supported; online payments, WhatsApp OTP, push notifications, and live GPS are not included.
 
-Orders are priced server-side using current product data, with stale-price and date checks. Capacity is enforced by a conditional database insert, and retry tokens prevent duplicate orders. Seller status transitions and customer access are checked on the server, with optimistic revisions to prevent stale overwrites.
-
-Normal flow: Diterima → Dikonfirmasi → Dikemas → Dalam perjalanan → Selesai. Changes to total, weight or substitutions enter Menunggu persetujuan, and the customer must approve before packing. Seller notes explain changes; packing lists retain original requested portions so the seller should review these notes. Customers can cancel before packing. Cash receipt is recorded after delivery. The dashboard supports product creation/editing, availability, combined shopping lists, printing, date filters and 30-second order refresh. It displays up to 500 most recent orders.
-
-## Tests and scope
-
-Tests exercise authorization, CSRF origin rejection, private receipt access, duplicate retry behavior, atomic capacity, cancellation, stale revisions, unavailable products, quote approval, fulfillment/payment and Jakarta cutoff boundaries. Local UI testing uses only a separate test database.
-
-This release uses cash on delivery. It does not include WhatsApp OTP login, automated WhatsApp messages, online payments, live GPS, or push notifications. Product images use Unsplash and fonts use Google Fonts. Real customer data is not committed or bundled with the application.
+Private receipt links grant access to that order, including approval/cancellation. Customers should save them securely and avoid sharing them publicly. The seller list currently shows the most recent 500 orders.

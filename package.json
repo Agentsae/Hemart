@@ -1,1 +1,19 @@
-{"name":"hemart","version":"1.0.0","private":true,"type":"module","scripts":{"dev":"node --experimental-sqlite server.mjs","build":"node scripts/build.mjs","test":"node --experimental-sqlite --test tests/*.test.mjs"}}
+{
+  "name": "hemart",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --experimental-sqlite server.mjs",
+    "build": "node scripts/build.mjs",
+    "test": "node --experimental-sqlite --test tests/*.test.mjs",
+    "cf": "node scripts/cloudflare.mjs",
+    "database:configure": "node scripts/configure-database.mjs",
+    "seller:setup": "node scripts/setup-seller.mjs",
+    "deploy": "node scripts/deploy.mjs",
+    "deploy:check": "node scripts/cloudflare.mjs deploy --dry-run --outdir .local/deploy-check"
+  },
+  "devDependencies": {
+    "wrangler": "4.149.0"
+  }
+}

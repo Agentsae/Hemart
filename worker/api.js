@@ -1,11 +1,12 @@
 import {initialProducts} from './catalog.js';
+import {sellerSession,authEndpoint} from './auth.js';
 export const defaults={areas:['Perum Megaregency'],deliveryFee:0,capacity:20,cutoff:21,open:false,whatsapp:'',announcement:'Pesanan segera dibuka. Kami sedang menyiapkan katalog dan harga terbaru.'};
 const statuses=['Diterima','Menunggu persetujuan','Dikonfirmasi','Dikemas','Dalam perjalanan','Selesai','Dibatalkan'];
 const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'}});
 function fail(message,status=400){throw Object.assign(new Error(message),{status});}
 export async function hash(value){return [...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value)))].map(b=>b.toString(16).padStart(2,'0')).join('');}
 export function schedule(now=new Date(),cutoff=21){const p=Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Jakarta',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',hourCycle:'h23'}).formatToParts(now).map(p=>[p.type,p.value]));const d=new Date(`${p.year}-${p.month}-${p.day}T05:00:00Z`);d.setUTCDate(d.getUTCDate()+(+p.hour>=cutoff?2:1));return d.toISOString().slice(0,10);}
-export function isSeller(request,env){const email=request.headers.get('oai-authenticated-user-email')?.toLowerCase();return !!request.headers.get('oai-authenticated-user-id')&&!!email&&(env.SELLER_EMAILS||'').toLowerCase().split(',').map(s=>s.trim()).includes(email);}
+export async function isSeller(request,env){return sellerSession(request,env);}
 async function settings(db){const row=await db.prepare('SELECT data FROM settings WHERE id=1').first();return row?{...defaults,...JSON.parse(row.data)}:{...defaults};}
 async function catalog(db){const rows=(await db.prepare('SELECT data FROM products').all()).results;const overrides=new Map(rows.map(r=>{const p=JSON.parse(r.data);return [p.id,p];}));return [...initialProducts.map(p=>overrides.get(p.id)||{...p,available:true}),...[...overrides.values()].filter(p=>!initialProducts.some(a=>a.id===p.id))];}
 function textField(v,label,max,min=1){if(typeof v!=='string'||v.trim().length<min||v.trim().length>max)fail(`${label} tidak valid.`);return v.trim();}
@@ -20,17 +21,18 @@ export function validateProduct(input,id){if(!/^[a-z0-9-]{1,50}$/.test(id))fail(
 export async function handle(request,env,assets={}){const url=new URL(request.url);let path=url.pathname;try{
  if(path==='/seller'||path==='/seller/'){
  if(!['GET','HEAD'].includes(request.method))return json({error:'Metode tidak didukung.'},405);
- if(!request.headers.get('oai-authenticated-user-id'))return new Response(null,{status:302,headers:{Location:'/signin-with-chatgpt?return_to=%2Fseller','Cache-Control':'no-store'}});
- if(!isSeller(request,env))return new Response('<!doctype html><html lang="id"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Akses khusus penjual</title><h1>Akses khusus penjual</h1><p>Akun ini tidak memiliki akses ke dashboard penjual.</p><a href="/">Kembali belanja</a></html>',{status:403,headers:{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
+ if(!await isSeller(request,env))return new Response(null,{status:302,headers:{Location:'/seller/login','Cache-Control':'no-store'}});
  if(path==='/seller/')return new Response(null,{status:302,headers:{Location:'/seller','Cache-Control':'no-store'}});
  path='/';
  }
+ if(path==='/seller/login')path='/seller-login.html';
+ if(path==='/api/auth/login'||path==='/api/auth/logout')return await authEndpoint(request,env,path);
  if(!path.startsWith('/api/')){if(!['GET','HEAD'].includes(request.method))return json({error:'Metode tidak didukung.'},405);const asset=assets[path];if(!asset)return json({error:'Tidak ditemukan.'},404);return new Response(request.method==='HEAD'?null:Uint8Array.from(atob(asset.data),c=>c.charCodeAt(0)),{headers:{'Content-Type':asset.type,'Cache-Control':'no-cache','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https://images.unsplash.com data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'"}});}
  if(!env.DB)fail('Penyimpanan belum siap. Silakan coba lagi.',503);
  if(!['GET','HEAD'].includes(request.method)){if(request.headers.get('Origin')!==url.origin)fail('Asal permintaan tidak diizinkan.',403);if(!request.headers.get('Content-Type')?.includes('application/json'))fail('Gunakan JSON.',415);}
- const db=env.DB;const seller=isSeller(request,env);
+ const db=env.DB;const seller=await isSeller(request,env);
  if(path.startsWith('/api/seller/')&&!seller)fail('Masuk dengan akun penjual untuk melanjutkan.',403);
- if(path==='/api/bootstrap'&&request.method==='GET'){const s=await settings(db);const delivery=schedule(new Date(),s.cutoff);const count=await db.prepare("SELECT COUNT(*) AS n FROM orders WHERE delivery=? AND status!='Dibatalkan'").bind(delivery).first();return json({settings:s,products:await catalog(db),delivery,remaining:Math.max(0,s.capacity-count.n),seller,authenticated:!!request.headers.get('oai-authenticated-user-id')});}
+ if(path==='/api/bootstrap'&&request.method==='GET'){const s=await settings(db);const delivery=schedule(new Date(),s.cutoff);const count=await db.prepare("SELECT COUNT(*) AS n FROM orders WHERE delivery=? AND status!='Dibatalkan'").bind(delivery).first();return json({settings:s,products:await catalog(db),delivery,remaining:Math.max(0,s.capacity-count.n),seller,authenticated:seller});}
  if(path==='/api/orders'&&request.method==='POST'){
  const t=token(request);const tokenHash=await hash(t);const input=await body(request);const requestHash=await hash(JSON.stringify(input));
  const existing=await db.prepare('SELECT * FROM orders WHERE token_hash=?').bind(tokenHash).first();if(existing){if(existing.request_hash!==requestHash)fail('Permintaan ulang berbeda. Muat ulang pesanan sebelumnya.',409);return json(unpack(existing));}

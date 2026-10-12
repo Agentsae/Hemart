@@ -1,0 +1,4 @@
+# Run npm run seller:setup to create .dev.vars with your own credentials.
+# This example is intentionally unusable. Never deploy a shared default password.
+SELLER_USERNAME="bapak"
+SELLER_PASSWORD_HASH="generated-by-seller-setup"
