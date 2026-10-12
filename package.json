@@ -4,6 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "dev": "node --experimental-sqlite server.mjs",
     "build": "node scripts/build.mjs",
     "test": "node --experimental-sqlite --test tests/*.test.mjs",
@@ -14,6 +16,7 @@
     "deploy:check": "node scripts/cloudflare.mjs deploy --dry-run --outdir .local/deploy-check"
   },
   "devDependencies": {
+    "prettier": "3.6.2",
     "wrangler": "4.149.0"
   }
 }

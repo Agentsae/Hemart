@@ -59,13 +59,13 @@ After buying a domain, connect it to Cloudflare and add it under the Worker's **
 
 The application includes early Cloudflare rate-limit bindings, configured in [wrangler.json](./wrangler.json). They execute inside the Worker, before database queries, session lookup, and password hashing. They do not prevent Worker invocations or guarantee uninterrupted availability.
 
-| Requests per client IP | Budget per minute |
-| --- | ---: |
-| All requests, including static files and unknown paths | 300 |
-| All API requests | 120 |
-| API writes | 30 |
-| Checkout submissions | 5 |
-| Seller login requests | 5 |
+| Requests per client IP                                 | Budget per minute |
+| ------------------------------------------------------ | ----------------: |
+| All requests, including static files and unknown paths |               300 |
+| All API requests                                       |               120 |
+| API writes                                             |                30 |
+| Checkout submissions                                   |                 5 |
+| Seller login requests                                  |                 5 |
 
 Limits stack. Excess requests receive HTTP 429 and `Retry-After: 60`; customers see an Indonesian retry message. Existing database-backed limits also restrict login to 10 attempts per 15-minute window and new checkout submissions to 40 per 10-minute window. Changing query strings, receipt keys, or forwarded headers does not create a new allowance. Login bodies are capped at 2,048 bytes and other parsed JSON at 20,000 bytes, including chunked uploads. Missing or failed rate-limit bindings return 503 rather than silently removing protection.
 
@@ -95,6 +95,7 @@ npm run cf -- d1 export DB --remote --output .local/hemart-backup.sql
 The backup contains customer addresses and order data. Store it privately, outside public repositories. Cloudflare usage and plan limits are managed in your own account; review them before opening orders broadly.
 
 Official references:
+
 - https://developers.cloudflare.com/workers/wrangler/configuration/
 - https://developers.cloudflare.com/d1/get-started/
 - https://developers.cloudflare.com/workers/configuration/secrets/

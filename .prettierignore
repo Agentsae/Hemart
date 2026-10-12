@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.local/
+.wrangler/
+.openai/
+package-lock.json
+# Applied database migrations are immutable.
+drizzle/

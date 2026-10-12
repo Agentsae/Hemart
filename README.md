@@ -22,7 +22,11 @@ npm run deploy:check
 
 `public/` contains the interface, `worker/` contains API/authentication code, `drizzle/` contains append-only schema migrations, and `wrangler.json` configures independent hosting. The build embeds the public files into `dist/server/index.js`. The old `.openai/hosting.json` records the legacy ChatGPT demo only; the independent build and deployment do not use it. The old hosted demo is not modified by these changes.
 
-## Production
+## Code formatting
+
+Run `npm run format` to format the project, or `npm run format:check` to check formatting without changing files. JavaScript, HTML, CSS, and configuration files use Prettier with two-space indentation. Generated output, local data, and existing database migrations are excluded.
+
+## Production deployment
 
 See [DEPLOYMENT.md](DEPLOYMENT.md). First create your own Cloudflare account, create a D1 database, configure its returned ID, deploy, and set the production seller credentials. Until the seller credentials are configured, seller login fails closed. Until the seller opens the store, checkout is paused. No customer data, settings, or credentials from the ChatGPT demo are automatically transferred to the new database.
 
