@@ -5,6 +5,62 @@
   "compatibility_date": "2026-01-01",
   "workers_dev": true,
   "preview_urls": false,
-  "build": { "command": "node scripts/build.mjs" },
-  "d1_databases": [{ "binding": "DB", "database_name": "hemart-production", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "drizzle" }]
+  "build": {
+    "command": "node scripts/build.mjs"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "hemart-production",
+      "database_id": "cde44ce2-888e-4baa-9442-c58894ece84b",
+      "migrations_dir": "drizzle"
+    },
+    {
+      "binding": "hemart_production",
+      "database_name": "hemart-production",
+      "database_id": "cde44ce2-888e-4baa-9442-c58894ece84b"
+    }
+  ],
+  "ratelimits": [
+    {
+      "name": "REQUEST_LIMIT",
+      "namespace_id": "73100",
+      "simple": {
+        "limit": 300,
+        "period": 60
+      }
+    },
+    {
+      "name": "API_LIMIT",
+      "namespace_id": "73101",
+      "simple": {
+        "limit": 120,
+        "period": 60
+      }
+    },
+    {
+      "name": "WRITE_LIMIT",
+      "namespace_id": "73102",
+      "simple": {
+        "limit": 30,
+        "period": 60
+      }
+    },
+    {
+      "name": "ORDER_LIMIT",
+      "namespace_id": "73103",
+      "simple": {
+        "limit": 5,
+        "period": 60
+      }
+    },
+    {
+      "name": "LOGIN_LIMIT",
+      "namespace_id": "73104",
+      "simple": {
+        "limit": 5,
+        "period": 60
+      }
+    }
+  ]
 }

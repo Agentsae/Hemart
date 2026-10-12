@@ -1,3 +1,4 @@
+import {protectRequest,boundedText} from './security.js';
 import {initialProducts} from './catalog.js';
 import {sellerSession,authEndpoint} from './auth.js';
 export const defaults={areas:['Perum Megaregency'],deliveryFee:0,capacity:20,cutoff:21,open:false,whatsapp:'',announcement:'Pesanan segera dibuka. Kami sedang menyiapkan katalog dan harga terbaru.'};
@@ -11,7 +12,7 @@ async function settings(db){const row=await db.prepare('SELECT data FROM setting
 async function catalog(db){const rows=(await db.prepare('SELECT data FROM products').all()).results;const overrides=new Map(rows.map(r=>{const p=JSON.parse(r.data);return [p.id,p];}));return [...initialProducts.map(p=>overrides.get(p.id)||{...p,available:true}),...[...overrides.values()].filter(p=>!initialProducts.some(a=>a.id===p.id))];}
 function textField(v,label,max,min=1){if(typeof v!=='string'||v.trim().length<min||v.trim().length>max)fail(`${label} tidak valid.`);return v.trim();}
 function integer(v,label,min,max){if(!Number.isSafeInteger(v)||v<min||v>max)fail(`${label} tidak valid.`);return v;}
-async function body(request){if(Number(request.headers.get('content-length')||0)>20000)fail('Permintaan terlalu besar.',413);const raw=await request.text();if(raw.length>20000)fail('Permintaan terlalu besar.',413);try{return JSON.parse(raw);}catch{fail('Format permintaan tidak valid.');}}
+async function body(request){const raw=await boundedText(request,20000);try{return JSON.parse(raw);}catch{fail('Format permintaan tidak valid.');}}
 function token(request){const t=request.headers.get('X-Receipt-Token');if(!t||!/^[-_A-Za-z0-9]{43}$/.test(t))fail('Tautan pesanan tidak valid.',401);return t;}
 function unpack(row){return {...JSON.parse(row.data),id:row.id,delivery:row.delivery,status:row.status,createdAt:row.created_at,updatedAt:row.updated_at,revision:row.revision};}
 async function orderRow(db,id){const row=await db.prepare('SELECT * FROM orders WHERE id=?').bind(id).first();if(!row)fail('Pesanan tidak ditemukan.',404);return row;}
@@ -19,6 +20,7 @@ async function rateLimit(request,db){const ip=request.headers.get('CF-Connecting
 export function validateSettings(input){const areas=(Array.isArray(input.areas)?input.areas:[]).map(a=>textField(a,'Area',80));if(!areas.length||areas.length>20||new Set(areas).size!==areas.length)fail('Isi 1–20 area unik.');const whatsapp=String(input.whatsapp||'').replace(/[^0-9]/g,'');if(whatsapp&&!/^62[0-9]{8,13}$/.test(whatsapp))fail('Gunakan nomor WhatsApp dengan kode 62.');return {areas,deliveryFee:integer(input.deliveryFee,'Ongkir',0,100000),capacity:integer(input.capacity,'Kapasitas',1,100),cutoff:integer(input.cutoff,'Jam tutup',12,23),open:input.open===true,whatsapp,announcement:textField(input.announcement||' ','Pengumuman',300,0)};}
 export function validateProduct(input,id){if(!/^[a-z0-9-]{1,50}$/.test(id))fail('ID produk tidak valid.');const category=textField(input.category,'Kategori',20);if(!['Sayuran','Buah','Lauk','Dapur'].includes(category))fail('Kategori tidak valid.');const image=textField(input.image||'/icon.svg','Foto',600);if(image!=='/icon.svg'&&!/^https:\/\/images\.unsplash\.com\/[\w/?=&%.+-]+$/.test(image))fail('Gunakan URL foto images.unsplash.com atau ikon bawaan.');return {id,name:textField(input.name,'Nama produk',80),unit:textField(input.unit,'Satuan',80),price:integer(input.price,'Harga',1,10000000),category,image,tag:textField(input.tag||'','Label',40,0),available:input.available===true};}
 export async function handle(request,env,assets={}){const url=new URL(request.url);let path=url.pathname;try{
+ const rejected=await protectRequest(request,env);if(rejected)return rejected;
  if(path==='/seller'||path==='/seller/'){
  if(!['GET','HEAD'].includes(request.method))return json({error:'Metode tidak didukung.'},405);
  if(!await isSeller(request,env))return new Response(null,{status:302,headers:{Location:'/seller/login','Cache-Control':'no-store'}});

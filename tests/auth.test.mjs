@@ -1,10 +1,11 @@
+import {allowRateLimits} from './rate-limit-fixture.mjs';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {handle} from '../worker/api.js';
 import {passwordHash} from '../worker/auth.js';
 import {createDB} from '../scripts/local-db.mjs';
 const origin='https://hemart.test',password='test-only-long-passphrase-123',encoded=await passwordHash(password);
-function setup(){return {DB:createDB(),SELLER_USERNAME:'bapak',SELLER_PASSWORD_HASH:encoded};}
+function setup(){return {...allowRateLimits(),DB:createDB(),SELLER_USERNAME:'bapak',SELLER_PASSWORD_HASH:encoded};}
 function req(path,body={},cookie='',headers={}){return new Request(origin+path,{method:'POST',headers:{Origin:origin,'Content-Type':'application/json',Cookie:cookie,...headers},body:JSON.stringify(body)});}
 async function login(env){const r=await handle(req('/api/auth/login',{username:'bapak',password}),env);assert.equal(r.status,200);return r.headers.get('Set-Cookie');}
 const assets={'/':{type:'text/html',data:btoa('<h1>Seller shell</h1>')}};

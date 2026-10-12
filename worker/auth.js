@@ -1,3 +1,4 @@
+import {boundedText} from './security.js';
 const SESSION_SECONDS=7*24*60*60;
 const encoder=new TextEncoder();
 const hex=bytes=>[...new Uint8Array(bytes)].map(b=>b.toString(16).padStart(2,'0')).join('');
@@ -34,7 +35,7 @@ export async function authEndpoint(request,env,path){
  const limitKey='login:'+await digest(ip+':'+Math.floor(now/900000));
  const limit=await env.DB.prepare('INSERT INTO rate_limits(key,hits,expires_at) VALUES(?,1,?) ON CONFLICT(key) DO UPDATE SET hits=hits+1 RETURNING hits').bind(limitKey,now+900000).first();
  if(limit.hits>10)return authJSON({error:'Terlalu banyak percobaan masuk. Coba lagi dalam 15 menit.'},429,{'Retry-After':'900'});
- const raw=await request.text();if(raw.length>2048)return authJSON({error:'Permintaan terlalu besar.'},413);
+ const raw=await boundedText(request,2048);
  let input;try{input=JSON.parse(raw);}catch{return authJSON({error:'Format permintaan tidak valid.'},400);}
  if(!input||typeof input.username!=='string'||typeof input.password!=='string'||input.username.length>80||input.password.length>256)return authJSON({error:'Nama pengguna atau kata sandi salah.'},401);
  const candidate=await passwordHash(input.password,env.SELLER_PASSWORD_HASH.split('$')[2]);

@@ -1,3 +1,4 @@
+import {allowRateLimits} from './rate-limit-fixture.mjs';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {handle,defaults,schedule,validateSettings} from '../worker/api.js';
@@ -6,7 +7,7 @@ import {passwordHash} from '../worker/auth.js';
 const testPassword='local-test-passphrase-123';
 const testHash=await passwordHash(testPassword);
 const origin='https://hemart.test';
-function setup(){const DB=createDB();const env={DB,SELLER_USERNAME:'bapak',SELLER_PASSWORD_HASH:testHash};let cookie='';async function request(path,method='GET',body,options={}){const headers={'Content-Type':'application/json',Origin:options.origin||origin};if(options.seller){if(!cookie){const login=await handle(new Request(origin+'/api/auth/login',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify({username:'bapak',password:testPassword})}),env);cookie=login.headers.get('Set-Cookie').split(';')[0];}headers.Cookie=cookie;}if(options.token)headers['X-Receipt-Token']=options.token;const response=await handle(new Request(origin+path,{method,headers,...(body?{body:JSON.stringify(body)}:{})}),env);return {status:response.status,body:await response.json(),headers:response.headers};}return {DB,request};}
+function setup(){const DB=createDB();const env={...allowRateLimits(),DB,SELLER_USERNAME:'bapak',SELLER_PASSWORD_HASH:testHash};let cookie='';async function request(path,method='GET',body,options={}){const headers={'Content-Type':'application/json',Origin:options.origin||origin};if(options.seller){if(!cookie){const login=await handle(new Request(origin+'/api/auth/login',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify({username:'bapak',password:testPassword})}),env);cookie=login.headers.get('Set-Cookie').split(';')[0];}headers.Cookie=cookie;}if(options.token)headers['X-Receipt-Token']=options.token;const response=await handle(new Request(origin+path,{method,headers,...(body?{body:JSON.stringify(body)}:{})}),env);return {status:response.status,body:await response.json(),headers:response.headers};}return {DB,request};}
 const token=()=>Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url');
 const payload=()=>({name:'Test Customer',phone:'081234567890',address:'Test address block A no 12',area:'Perum Megaregency',notes:'',substitution:'Hubungi saya terlebih dahulu',delivery:schedule(),deliveryFee:0,items:[{id:'bayam',qty:2,price:5000}]});
 async function opened(){const x=setup();assert.equal((await x.request('/api/seller/settings','PUT',{...defaults,open:true},{seller:true})).status,200);return x;}
