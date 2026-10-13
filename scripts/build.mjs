@@ -38,6 +38,6 @@ await writeFile(
     api +
     '\nconst ASSETS=' +
     JSON.stringify(assets) +
-    ';\nexport default {async fetch(request,env){return handle(request,env,ASSETS);}};\n',
+    ';\nexport default {async fetch(request,env){return handle(request,env,ASSETS);},async scheduled(event,env){if(!env.DB)throw new Error("DB binding missing");await deleteExpiredOrders(env.DB,new Date(event.scheduledTime));}};\n',
 );
 console.log('Built Worker with ' + Object.keys(assets).length + ' embedded assets.');

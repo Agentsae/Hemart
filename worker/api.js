@@ -1,4 +1,4 @@
-import { protectRequest, boundedText } from './security.js';
+import { protectRequest, boundedText, requestBodyLimit } from './security.js';
 import { initialProducts } from './catalog.js';
 import { sellerSession, authEndpoint } from './auth.js';
 export const defaults = {
@@ -57,6 +57,13 @@ export function schedule(now = new Date(), cutoff = 21) {
   d.setUTCDate(d.getUTCDate() + daysUntilDelivery);
   return d.toISOString().slice(0, 10);
 }
+export async function deleteExpiredOrders(db, now = new Date()) {
+  const cutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  return db
+    .prepare("DELETE FROM orders WHERE status IN ('Selesai','Dibatalkan') AND updated_at < ?")
+    .bind(cutoff)
+    .run();
+}
 export async function isSeller(request, env) {
   return sellerSession(request, env);
 }
@@ -87,7 +94,10 @@ function integer(v, label, min, max) {
   return v;
 }
 async function body(request) {
-  const raw = await boundedText(request, 20000);
+  const raw = await boundedText(
+    request,
+    requestBodyLimit(new URL(request.url).pathname, request.method),
+  );
   try {
     return JSON.parse(raw);
   } catch {
@@ -151,8 +161,12 @@ export function validateProduct(input, id) {
   const category = textField(input.category, 'Kategori', 20);
   if (!['Sayuran', 'Buah', 'Lauk', 'Dapur'].includes(category)) fail('Kategori tidak valid.');
   const image = textField(input.image || '/icon.svg', 'Foto', 600);
-  if (image !== '/icon.svg' && !/^https:\/\/images\.unsplash\.com\/[\w/?=&%.+-]+$/.test(image))
-    fail('Gunakan URL foto images.unsplash.com atau ikon bawaan.');
+  if (
+    image !== '/icon.svg' &&
+    !/^https:\/\/images\.unsplash\.com\/[\w/?=&%.+-]+$/.test(image) &&
+    !/^\/api\/images\/[a-f0-9]{64}$/.test(image)
+  )
+    fail('Gunakan foto yang diunggah, URL images.unsplash.com, atau ikon bawaan.');
   return {
     id,
     name: textField(input.name, 'Nama produk', 80),
@@ -210,6 +224,26 @@ export async function handle(request, env, assets = {}) {
       );
     }
     if (!env.DB) fail('Penyimpanan belum siap. Silakan coba lagi.', 503);
+    const imageMatch = path.match(/^\/api\/images\/([a-f0-9]{64})$/);
+    if (imageMatch && ['GET', 'HEAD'].includes(request.method)) {
+      const image = await env.DB.prepare('SELECT data FROM product_images WHERE id=?')
+        .bind(imageMatch[1])
+        .first();
+      if (!image) fail('Foto tidak ditemukan.', 404);
+      return new Response(
+        request.method === 'HEAD'
+          ? null
+          : Uint8Array.from(atob(image.data), (c) => c.charCodeAt(0)),
+        {
+          headers: {
+            'Content-Type': 'image/jpeg',
+            'Cache-Control': 'public, max-age=31536000, immutable',
+            'X-Content-Type-Options': 'nosniff',
+            'Content-Security-Policy': "default-src 'none'; sandbox",
+          },
+        },
+      );
+    }
     if (!['GET', 'HEAD'].includes(request.method)) {
       if (request.headers.get('Origin') !== url.origin)
         fail('Asal permintaan tidak diizinkan.', 403);
@@ -336,10 +370,35 @@ export async function handle(request, env, assets = {}) {
       return json(unpack(await orderRow(db, id)), 201);
     }
     if (path === '/api/seller/orders' && request.method === 'GET') {
-      const rows = (
-        await db.prepare('SELECT * FROM orders ORDER BY created_at DESC LIMIT 500').all()
+      const offsetText = url.searchParams.get('offset') || '0';
+      if (!/^(0|[1-9]\d*)$/.test(offsetText) || Number(offsetText) > 1000000)
+        fail('Posisi riwayat tidak valid.');
+      const offset = Number(offsetText);
+      const date = url.searchParams.get('date');
+      if (date && !/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(date))
+        fail('Tanggal tidak valid.');
+      const active = (
+        await db
+          .prepare(
+            "SELECT * FROM orders WHERE status NOT IN ('Selesai','Dibatalkan') AND (? IS NULL OR delivery=?) ORDER BY created_at DESC, id DESC",
+          )
+          .bind(date, date)
+          .all()
       ).results;
-      return json({ orders: rows.map(unpack) });
+      const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const history = (
+        await db
+          .prepare(
+            "SELECT * FROM orders WHERE status IN ('Selesai','Dibatalkan') AND updated_at>=? AND (? IS NULL OR delivery=?) ORDER BY updated_at DESC, id DESC LIMIT 101 OFFSET ?",
+          )
+          .bind(cutoff, date, date, offset)
+          .all()
+      ).results;
+      return json({
+        active: active.map(unpack),
+        history: history.slice(0, 100).map(unpack),
+        hasMore: history.length > 100,
+      });
     }
     if (path === '/api/seller/settings' && request.method === 'PUT') {
       const s = validateSettings(await body(request));
@@ -353,7 +412,37 @@ export async function handle(request, env, assets = {}) {
     }
     const productMatch = path.match(/^\/api\/seller\/products\/([a-z0-9-]+)$/);
     if (productMatch && request.method === 'PUT') {
-      const p = validateProduct(await body(request), productMatch[1]);
+      const input = await body(request);
+      const p = validateProduct(input, productMatch[1]);
+      if (input.imageUpload !== undefined) {
+        if (
+          typeof input.imageUpload !== 'string' ||
+          !/^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/.test(input.imageUpload)
+        )
+          fail('Format foto tidak valid. Pilih foto JPG, PNG, atau WebP melalui form.');
+        const encoded = input.imageUpload.slice('data:image/jpeg;base64,'.length);
+        let bytes;
+        try {
+          bytes = atob(encoded);
+        } catch {
+          fail('Format foto tidak valid.');
+        }
+        if (bytes.length > 245760) fail('Foto maksimal 240 KB setelah diperkecil.', 413);
+        if (bytes.length < 4 || !bytes.startsWith('\xff\xd8\xff') || !bytes.endsWith('\xff\xd9'))
+          fail('Isi foto JPEG tidak valid.');
+        const imageId = await hash(encoded);
+        await db
+          .prepare('INSERT INTO product_images(id,data) VALUES(?,?) ON CONFLICT(id) DO NOTHING')
+          .bind(imageId, encoded)
+          .run();
+        p.image = '/api/images/' + imageId;
+      } else if (p.image.startsWith('/api/images/')) {
+        const existingImage = await db
+          .prepare('SELECT id FROM product_images WHERE id=?')
+          .bind(p.image.split('/').pop())
+          .first();
+        if (!existingImage) fail('Foto tidak ditemukan. Unggah ulang foto.');
+      }
       await db
         .prepare(
           'INSERT INTO products(id,data) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data',

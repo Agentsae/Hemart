@@ -63,6 +63,8 @@ let products = [],
   receipts = read('hemart-receipts', []),
   orders = [],
   sellerOrders = [],
+  sellerHistory = [],
+  sellerHasMore = false,
   category = 'Semua',
   query = '',
   page = 'shop',
@@ -367,10 +369,17 @@ async function loadOrders() {
   const results = await Promise.allSettled(
     receipts.map((r) => api(`/api/orders/${r.id}`, { headers: { 'X-Receipt-Token': r.token } })),
   );
+  const kept = receipts.filter(
+    (_, index) => !(results[index].status === 'rejected' && results[index].reason?.status === 404),
+  );
+  if (kept.length !== receipts.length) {
+    receipts = kept;
+    save('hemart-receipts', receipts);
+  }
   orders = results.filter((r) => r.status === 'fulfilled').map((r) => r.value);
   $('#orders-list').innerHTML =
     orders.map((o) => orderCard(o)).join('') +
-    (results.some((r) => r.status === 'rejected')
+    (results.some((r) => r.status === 'rejected' && r.reason?.status !== 404)
       ? '<p class="notice">Sebagian pesanan tidak dapat dimuat. Periksa koneksi atau tautan privat Anda.</p>'
       : '');
 }
@@ -382,7 +391,22 @@ async function loadSeller() {
     return;
   }
   $('.seller-tabs').hidden = false;
-  sellerOrders = (await api('/api/seller/orders')).orders;
+  const result = await api(`/api/seller/orders${filterDate ? '?date=' + filterDate : ''}`);
+  sellerOrders = result.active;
+  sellerHistory = result.history;
+  sellerHasMore = result.hasMore;
+  renderSeller();
+}
+async function loadMoreSellerHistory() {
+  if (!sellerHasMore) return;
+  const date = filterDate;
+  const result = await api(
+    `/api/seller/orders?offset=${sellerHistory.length}${date ? '&date=' + date : ''}`,
+  );
+  if (date !== filterDate) return;
+  sellerOrders = result.active;
+  sellerHistory.push(...result.history);
+  sellerHasMore = result.hasMore;
   renderSeller();
 }
 function renderSeller() {
@@ -394,7 +418,7 @@ function renderSeller() {
     renderProductAdmin();
     return;
   }
-  const list = sellerOrders.filter((o) => !filterDate || o.delivery === filterDate);
+  const list = [...sellerOrders, ...sellerHistory];
   $('#seller-content').innerHTML = /* HTML */ `<div class="seller-summary">
       <div>
         <b>${list.filter((o) => !['Selesai', 'Dibatalkan'].includes(o.status)).length}</b> pesanan
@@ -416,7 +440,7 @@ function renderSeller() {
       ><button class="secondary" id="seller-refresh">Perbarui</button
       ><button class="secondary" id="print-list">Cetak</button>
     </div>
-    <p class="muted">Maksimal 500 pesanan terbaru. Pilih tanggal untuk persiapan rute.</p>
+    <p class="muted">Pesanan aktif selalu tampil. Pesanan selesai atau dibatalkan dihapus 30 hari setelah perubahan status terakhir.</p>
     <div id="seller-results"></div>`;
   if (sellerMode === 'prep') {
     const groups = {};
@@ -461,6 +485,11 @@ function renderSeller() {
     $('#seller-results').innerHTML =
       list.map((o) => orderCard(o, true)).join('') ||
       '<div class="empty">Belum ada pesanan. Pesanan baru akan muncul di sini.</div>';
+  if (sellerMode === 'orders' && sellerHasMore)
+    $('#seller-results').insertAdjacentHTML(
+      'beforeend',
+      '<button class="secondary" id="seller-more">Muat lagi riwayat</button>',
+    );
 }
 function renderSettings() {
   $('#seller-content').innerHTML = /* HTML */ `<form id="settings-form" class="order-card">
@@ -542,6 +571,35 @@ function renderProductAdmin() {
         .join('')}
     </div>`;
 }
+async function prepareProductPhoto(file) {
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type))
+    throw new Error('Pilih foto JPG, PNG, atau WebP.');
+  if (file.size > 5 * 1024 * 1024) throw new Error('Ukuran file maksimal 5 MB.');
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(file);
+  } catch {
+    throw new Error('Foto tidak dapat dibaca. Coba file lain.');
+  }
+  try {
+    const scale = Math.min(1, 1024 / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const context = canvas.getContext('2d');
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    for (const quality of [0.85, 0.7, 0.55, 0.4]) {
+      const data = canvas.toDataURL('image/jpeg', quality);
+      if (data.length <= 327703) return data;
+    }
+    throw new Error('Foto masih terlalu besar. Pilih foto yang lebih kecil.');
+  } finally {
+    bitmap.close();
+  }
+}
+
 function editProduct(id) {
   const p = products.find((p) => p.id === id) || {
     id: '',
@@ -577,7 +635,13 @@ function editProduct(id) {
           .join('')}
       </select></label
     ><label
-      >URL foto (opsional)<input
+        >Upload foto dari perangkat<input
+          id="product-photo" type="file" accept="image/jpeg,image/png,image/webp" />
+        <small>JPG, PNG, atau WebP, maksimal 5 MB. Foto otomatis diperkecil. Foto baru disimpan saat menekan Simpan produk.</small>
+      </label>
+      <img id="product-photo-preview" class="product-photo-preview" src="${esc(p.image)}" alt="Pratinjau foto produk" />
+      <p id="product-photo-status" role="status"></p>
+      <label>URL foto (opsional; abaikan jika memilih file)<input
         name="image"
         value="${esc(p.image)}"
         placeholder="https://images.unsplash.com/…" /></label
@@ -587,6 +651,25 @@ function editProduct(id) {
       dipesan</label
     ><button class="primary full" type="submit">Simpan produk</button>`;
   $('#product-dialog').showModal();
+  const photoInput = $('#product-photo');
+  photoInput.addEventListener('change', async () => {
+    const file = photoInput.files[0];
+    $('#product-photo-preview').src = p.image;
+    $('#product-photo-status').textContent = '';
+    photoInput.setCustomValidity('');
+    if (!file) return;
+    $('#product-photo-status').textContent = 'Menyiapkan foto...';
+    try {
+      const photo = await prepareProductPhoto(file);
+      if (photoInput.files[0] !== file) return;
+      $('#product-photo-preview').src = photo;
+      $('#product-photo-status').textContent = 'Foto siap disimpan.';
+    } catch (error) {
+      if (photoInput.files[0] !== file) return;
+      photoInput.setCustomValidity(error.message);
+      $('#product-photo-status').textContent = error.message;
+    }
+  });
 }
 async function startCheckout() {
   await bootstrap();
@@ -763,8 +846,9 @@ document.addEventListener('click', async (event) => {
     }
     if (b.id === 'seller-all') {
       filterDate = '';
-      renderSeller();
+      await loadSeller();
     }
+    if (b.id === 'seller-more') await loadMoreSellerHistory();
     if (b.id === 'print-list') window.print();
     if (b.dataset.editProduct) editProduct(b.dataset.editProduct);
     if (b.id === 'new-product') editProduct();
@@ -817,9 +901,17 @@ document.addEventListener('submit', async (event) => {
     }
     if (form.id === 'product-form') {
       const id = v.id || 'produk-' + crypto.randomUUID().slice(0, 8);
+      const file = $('#product-photo').files[0];
+      const imageUpload = file ? await prepareProductPhoto(file) : undefined;
       await api('/api/seller/products/' + id, {
         method: 'PUT',
-        body: JSON.stringify({ ...v, price: Number(v.price), available: v.available === 'on' }),
+        body: JSON.stringify({
+          ...v,
+          image: file ? '/icon.svg' : v.image,
+          imageUpload,
+          price: Number(v.price),
+          available: v.available === 'on',
+        }),
       });
       $('#product-dialog').close();
       await bootstrap();
@@ -853,7 +945,7 @@ $('#search').addEventListener('input', (e) => {
 document.addEventListener('change', (e) => {
   if (e.target.id === 'seller-date') {
     filterDate = e.target.value;
-    renderSeller();
+    loadSeller().catch((error) => toast(error.message));
   }
 });
 let installPrompt;
@@ -927,6 +1019,7 @@ setInterval(async () => {
       page === 'seller' &&
       sellerMode === 'orders' &&
       seller &&
+      sellerHistory.length <= 100 &&
       !document.activeElement?.closest('.seller-filters')
     )
       await loadSeller();

@@ -41,4 +41,4 @@ See [DEPLOYMENT.md](DEPLOYMENT.md). First create your own Cloudflare account, cr
 
 Default settings: Perum Megaregency, Rp0 delivery, 21:00 WIB cutoff, delivery from 06:00, 20 orders per delivery date, blank WhatsApp number, and checkout paused pending real product/price review. Settings are editable from the seller dashboard. WhatsApp buttons open a conversation; they do not send automatic messages. Cash on delivery is supported; online payments, WhatsApp OTP, push notifications, and live GPS are not included.
 
-Private receipt links grant access to that order, including approval/cancellation. Customers should save them securely and avoid sharing them publicly. The seller list currently shows the most recent 500 orders.
+Private receipt links grant access to that order, including approval/cancellation. Customers should save them securely and avoid sharing them publicly. Completed and canceled orders are deleted after 30 days; active orders remain until resolved. The seller list pages through retained history.

@@ -84,6 +84,20 @@ References: [WAF rate-limiting rules](https://developers.cloudflare.com/waf/rate
 
 ## Updates and backups
 
+### Order retention
+
+Completed and canceled orders are permanently deleted once their `updated_at` timestamp is older than 30 × 24 hours. Active orders are never deleted by this policy. The Worker runs cleanup daily at 17:00 UTC (00:00 WIB); local development runs it at startup and every 24 hours while the server stays open. The seller dashboard hides expired history immediately and can load retained history in pages of 100. Customer browsers remove a receipt key from their local list after the API reports that its order no longer exists. Old private receipt links then return 404.
+
+Deploying this change applies `0003_order_retention.sql` and installs the daily Cron Trigger. Review and save any required records before the first scheduled cleanup. A database backup may preserve deleted records separately; the live site will no longer serve them.
+
+### Product photos
+
+The seller product form accepts local JPG, PNG, and WebP files up to 5 MB. The browser converts photos to JPEG, at most 1024 pixels on the longest side and 240 KB, before saving. Uploaded photos are public product assets stored separately in D1 by content hash; catalog and order records contain only their URL. Existing photos remain available for old orders after replacement. Storage grows with new photos; this small-catalog approach can be moved to object storage if the catalog grows substantially.
+
+Deploying this feature requires the new `0002_product_images.sql` migration. `npm run deploy` applies it automatically. Local development applies migrations on server startup, so restart `npm run dev` after updating. Files uploaded locally remain in the local database; production uploads stay in production. No R2 bucket is required.
+
+Seller product PUT requests allow up to 350,000 bytes for the encoded photo; other API body limits are unchanged. Uploads require seller authentication and a same-origin JSON request, and use the existing write/API rate limits.
+
 Run `npm test` and `npm run deploy:check` before `npm run deploy`. Append new SQL migrations; never edit applied migrations. Do not deploy the `.local` database or `.dev.vars`.
 
 Export a private backup before schema changes:

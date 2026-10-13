@@ -2,9 +2,12 @@ import { localRateLimits } from './scripts/local-rate-limits.mjs';
 import http from 'node:http';
 import { readFile, mkdir } from 'node:fs/promises';
 import { createDB } from './scripts/local-db.mjs';
-import { handle } from './worker/api.js';
+import { handle, deleteExpiredOrders } from './worker/api.js';
+import { requestBodyLimit } from './worker/security.js';
 await mkdir('.local', { recursive: true });
 const db = createDB('.local/hemart.sqlite');
+await deleteExpiredOrders(db);
+setInterval(() => deleteExpiredOrders(db).catch(console.error), 24 * 60 * 60 * 1000).unref();
 try {
   process.loadEnvFile('.dev.vars');
 } catch (e) {
@@ -37,7 +40,7 @@ http
       let raw = '';
       for await (const chunk of req) {
         raw += chunk;
-        if (raw.length > 20000) {
+        if (Buffer.byteLength(raw) > requestBodyLimit(url.pathname, req.method)) {
           res.writeHead(413).end();
           return;
         }

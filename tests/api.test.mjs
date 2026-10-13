@@ -1,7 +1,13 @@
 import { allowRateLimits } from './rate-limit-fixture.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { handle, defaults, schedule, validateSettings } from '../worker/api.js';
+import {
+  handle,
+  defaults,
+  schedule,
+  validateSettings,
+  deleteExpiredOrders,
+} from '../worker/api.js';
 import { createDB } from '../scripts/local-db.mjs';
 import { passwordHash } from '../worker/auth.js';
 const testPassword = 'local-test-passphrase-123';
@@ -46,6 +52,125 @@ function setup() {
   return { DB, request };
 }
 const token = () => Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url');
+test('retention deletes only terminal orders older than 30 days and pages surviving history', async () => {
+  const { DB, request } = setup();
+  const now = new Date();
+  const daysAgo = (days, milliseconds = 0) =>
+    new Date(now.getTime() - days * 24 * 60 * 60 * 1000 + milliseconds).toISOString();
+  const insert = DB.sqlite.prepare(
+    'INSERT INTO orders(id,token_hash,request_hash,delivery,status,data,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)',
+  );
+  const add = (id, status, updatedAt, delivery = '2026-10-12') =>
+    insert.run(id, id, id, delivery, status, '{}', updatedAt, updatedAt);
+  add('HM-OLD-DONE', 'Selesai', daysAgo(31));
+  add('HM-OLD-CANCEL', 'Dibatalkan', daysAgo(31));
+  add('HM-OLD-ACTIVE', 'Diterima', daysAgo(31));
+  add('HM-BOUNDARY', 'Selesai', daysAgo(30));
+  for (let i = 0; i < 205; i++) add(`HM-RECENT-${i}`, 'Selesai', daysAgo(1));
+  const deleted = await deleteExpiredOrders(DB, now);
+  assert.equal(deleted.meta.changes, 2);
+  assert.equal(
+    DB.sqlite.prepare('SELECT COUNT(*) AS n FROM orders WHERE id=?').get('HM-OLD-ACTIVE').n,
+    1,
+  );
+  assert.equal(
+    DB.sqlite.prepare('SELECT COUNT(*) AS n FROM orders WHERE id=?').get('HM-BOUNDARY').n,
+    1,
+  );
+  const first = await request('/api/seller/orders', 'GET', undefined, { seller: true });
+  assert.equal(first.status, 200);
+  assert.equal(first.body.active.length, 1);
+  assert.equal(first.body.history.length, 100);
+  assert.equal(first.body.hasMore, true);
+  const second = await request('/api/seller/orders?offset=100', 'GET', undefined, { seller: true });
+  const third = await request('/api/seller/orders?offset=200', 'GET', undefined, { seller: true });
+  assert.equal(second.body.history.length, 100);
+  assert.equal(third.body.history.length, 5);
+  assert.equal(third.body.hasMore, false);
+  const ids = [...first.body.history, ...second.body.history, ...third.body.history].map(
+    (o) => o.id,
+  );
+  assert.equal(new Set(ids).size, 205);
+  const filtered = await request('/api/seller/orders?date=2026-10-11', 'GET', undefined, {
+    seller: true,
+  });
+  assert.equal(filtered.body.history.length, 0);
+  assert.equal(filtered.body.active.length, 0);
+  assert.equal(
+    (await request('/api/seller/orders?offset=-1', 'GET', undefined, { seller: true })).status,
+    400,
+  );
+  DB.sqlite.close();
+});
+test('seller photo uploads persist separately and can be served without login', async () => {
+  const { request, DB } = setup();
+  const bytes = Buffer.from([255, 216, 255, 224, 0, 2, 255, 217]);
+  const product = {
+    name: 'Foto produk',
+    unit: '1 buah',
+    price: 1000,
+    category: 'Buah',
+    image: '/icon.svg',
+    available: true,
+    imageUpload: 'data:image/jpeg;base64,' + bytes.toString('base64'),
+  };
+  assert.equal((await request('/api/seller/products/foto', 'PUT', product)).status, 403);
+  assert.equal(
+    (
+      await request('/api/seller/products/foto', 'PUT', product, {
+        seller: true,
+        origin: 'https://evil.test',
+      })
+    ).status,
+    403,
+  );
+  const saved = await request('/api/seller/products/foto', 'PUT', product, { seller: true });
+  assert.equal(saved.status, 200);
+  assert.match(saved.body.image, /^\/api\/images\/[a-f0-9]{64}$/);
+  assert.equal(saved.body.imageUpload, undefined);
+  const photo = await handle(new Request(origin + saved.body.image), { ...allowRateLimits(), DB });
+  assert.equal(photo.status, 200);
+  assert.equal(photo.headers.get('Content-Type'), 'image/jpeg');
+  assert.equal(photo.headers.get('X-Content-Type-Options'), 'nosniff');
+  assert.deepEqual(Buffer.from(await photo.arrayBuffer()), bytes);
+  const updated = await request(
+    '/api/seller/products/foto',
+    'PUT',
+    { ...saved.body, name: 'Updated' },
+    { seller: true },
+  );
+  assert.equal(updated.body.image, saved.body.image);
+  const catalog = await request('/api/bootstrap');
+  assert.equal(catalog.body.products.find((p) => p.id === 'foto').image, saved.body.image);
+  const invalid = {
+    ...product,
+    imageUpload: 'data:image/jpeg;base64,' + Buffer.from('<svg></svg>').toString('base64'),
+  };
+  assert.equal(
+    (await request('/api/seller/products/foto', 'PUT', invalid, { seller: true })).status,
+    400,
+  );
+  const oversized = {
+    ...product,
+    imageUpload: 'data:image/jpeg;base64,' + Buffer.alloc(245761).toString('base64'),
+  };
+  assert.equal(
+    (await request('/api/seller/products/foto', 'PUT', oversized, { seller: true })).status,
+    413,
+  );
+  assert.equal(
+    (
+      await request(
+        '/api/seller/products/foto',
+        'PUT',
+        { ...saved.body, image: '/api/images/' + '0'.repeat(64) },
+        { seller: true },
+      )
+    ).status,
+    400,
+  );
+  DB.sqlite.close();
+});
 const payload = () => ({
   name: 'Test Customer',
   phone: '081234567890',
@@ -122,7 +247,7 @@ test('guest receipt is private; retries do not duplicate orders', async () => {
   assert.equal(receipt.headers.get('Cache-Control'), 'no-store');
   assert.equal(receipt.body.token_hash, undefined);
   assert.equal(
-    (await request('/api/seller/orders', 'GET', null, { seller: true })).body.orders.length,
+    (await request('/api/seller/orders', 'GET', null, { seller: true })).body.active.length,
     1,
   );
 });

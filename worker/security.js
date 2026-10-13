@@ -38,10 +38,16 @@ export async function protectRequest(request, env) {
     return protectionResponse(414, 'Alamat permintaan terlalu panjang.');
   if (!['GET', 'HEAD', 'POST', 'PUT', 'PATCH'].includes(request.method))
     return protectionResponse(405, 'Metode tidak didukung.');
-  const maximum = path === '/api/auth/login' ? 2048 : 20000;
+  const maximum = requestBodyLimit(path, request.method);
   if (Number(request.headers.get('Content-Length') || 0) > maximum)
     return protectionResponse(413, 'Permintaan terlalu besar.');
   return null;
+}
+
+export function requestBodyLimit(path, method) {
+  if (path === '/api/auth/login') return 2048;
+  if (method === 'PUT' && /^\/api\/seller\/products\/[a-z0-9-]+$/.test(path)) return 350000;
+  return 20000;
 }
 
 export async function boundedText(request, maximum) {
