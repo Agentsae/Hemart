@@ -1353,3 +1353,29 @@ textarea {
 .seller-mode header .brand {
   margin-right: auto;
 }
+
+.product-admin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.product-delete {
+  color: #a12d25;
+  border-color: #d9aaa6;
+}
+
+.delete-dialog-actions {
+  justify-content: flex-end;
+  margin-top: 24px;
+}
+.danger-button {
+  background: #a12d25;
+  color: white;
+}
+.danger-button:hover {
+  background: #84231d;
+}
+#delete-product-description {
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}

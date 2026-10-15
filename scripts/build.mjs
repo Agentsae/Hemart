@@ -20,10 +20,11 @@ const security = await readFile('worker/security.js', 'utf8');
 // These modules are embedded above, so remove their imports regardless of formatting.
 function removeEmbeddedImports(source) {
   return source.replace(
-    /^import\s*\{[^}]*\}\s*from\s*['"]\.\/(?:security|catalog|auth)\.js['"];?\s*/gm,
+    /^import\s*\{[^}]*\}\s*from\s*['"]\.\/(?:security|catalog|auth|catalog-updates)\.js['"];?\s*/gm,
     '',
   );
 }
+const updates = await readFile('worker/catalog-updates.js', 'utf8');
 const auth = removeEmbeddedImports(await readFile('worker/auth.js', 'utf8'));
 const api = removeEmbeddedImports(await readFile('worker/api.js', 'utf8'));
 await mkdir('dist/server', { recursive: true });
@@ -34,6 +35,8 @@ await writeFile(
     security +
     '\n' +
     auth +
+    '\n' +
+    updates +
     '\n' +
     api +
     '\nconst ASSETS=' +

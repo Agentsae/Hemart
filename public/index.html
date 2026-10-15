@@ -312,6 +312,29 @@
         ><button class="primary full" type="submit">Minta persetujuan pelanggan</button>
       </form>
     </dialog>
+    <dialog
+      id="delete-product-dialog"
+      aria-labelledby="delete-product-title"
+      aria-describedby="delete-product-description"
+    >
+      <div class="dialog-heading"><h2 id="delete-product-title">Hapus produk?</h2></div>
+      <p id="delete-product-description">
+        Produk <strong id="delete-product-name"></strong> akan dihapus dari katalog dan tidak muncul
+        lagi di toko. Riwayat pesanan tetap tersimpan.
+      </p>
+      <p id="delete-product-error" class="notice" role="alert" hidden></p>
+      <div class="product-admin-actions delete-dialog-actions">
+        <button
+          class="secondary"
+          id="delete-product-cancel"
+          data-close="delete-product-dialog"
+          autofocus
+        >
+          Batal
+        </button>
+        <button class="primary danger-button" id="delete-product-confirm">Hapus produk</button>
+      </div>
+    </dialog>
     <div id="toast" role="status" aria-live="polite"></div>
     <script type="module" src="/app.js"></script>
   </body>

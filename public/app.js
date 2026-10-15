@@ -118,8 +118,11 @@ function receiptToken(id) {
 function receiptURL(id) {
   return `${location.origin}/#receipt=${encodeURIComponent(id)}&key=${receiptToken(id)}`;
 }
+let catalogSnapshot = '';
 async function bootstrap() {
   const data = await api('/api/bootstrap');
+  const snapshot = JSON.stringify(data);
+  if (snapshot === catalogSnapshot) return data;
   products = data.products;
   config = data.settings;
   delivery = data.delivery;
@@ -130,8 +133,15 @@ async function bootstrap() {
       ([id, q]) => products.some((p) => p.id === id) && Number.isInteger(q) && q > 0 && q <= 20,
     ),
   );
+  save('hemart-cart', cart);
+  save('hemart-catalog-cache', {
+    products: data.products,
+    settings: data.settings,
+    delivery: data.delivery,
+  });
   renderProducts();
   renderCategories();
+  if ($('#cart-dialog').open) renderCart();
   $('#delivery-label').textContent = `Pengantaran ${day(delivery)}`;
   const cutoffLabel = `${String(config.cutoff).padStart(2, '0')}.00 WIB`;
   $('.cutoff b').textContent = cutoffLabel;
@@ -144,6 +154,7 @@ async function bootstrap() {
   $('#shop-status').textContent = config.open ? 'Pemesanan dibuka' : 'Pemesanan belum dibuka';
   $('#contact-link').hidden = !config.whatsapp;
   if (config.whatsapp) $('#contact-link').href = `https://wa.me/${config.whatsapp}`;
+  catalogSnapshot = snapshot;
   return data;
 }
 function qtyControl(id) {
@@ -583,11 +594,15 @@ function renderSellerProducts() {
       .map(
         (p) => /* HTML */ `<article class="order-card">
               <h3>${esc(p.name)}</h3>
+              <p class="muted">${esc(p.category)}${p.tag ? ' &middot; ' + esc(p.tag) : ''}</p>
               <p>
                 ${esc(p.unit)}<br /><b>${money(p.price)}</b> ·
                 ${p.available ? 'Tersedia' : 'Kosong'}
               </p>
-              <button class="secondary" data-edit-product="${p.id}">Ubah produk</button>
+              <div class="product-admin-actions">
+                <button class="secondary" data-edit-product="${p.id}">Ubah produk</button>
+                <button class="secondary product-delete" data-delete-product="${p.id}">Hapus produk</button>
+              </div>
             </article>`,
       )
       .join('') || '<div class="empty">Tidak ada produk yang cocok. Coba kata kunci lain.</div>';
@@ -632,6 +647,7 @@ function editProduct(id) {
     tag: '',
     available: true,
   };
+  $('#product-dialog h2').textContent = p.id ? 'Ubah produk' : 'Tambah produk';
   $('#product-form').innerHTML = /* HTML */ `<input name="id" type="hidden" value="${p.id}" /><label
       >Nama produk<input name="name" required maxlength="80" value="${esc(p.name)}" /></label
     ><label
@@ -871,6 +887,39 @@ document.addEventListener('click', async (event) => {
     }
     if (b.id === 'seller-more') await loadMoreSellerHistory();
     if (b.id === 'print-list') window.print();
+    if (b.dataset.deleteProduct) {
+      const product = products.find((p) => p.id === b.dataset.deleteProduct);
+      if (!product) return;
+      $('#delete-product-dialog').dataset.productId = product.id;
+      $('#delete-product-name').textContent = product.name;
+      $('#delete-product-error').hidden = true;
+      $('#delete-product-dialog').showModal();
+    }
+    if (b.id === 'delete-product-confirm') {
+      const dialog = $('#delete-product-dialog');
+      const id = dialog.dataset.productId;
+      if (!id || b.disabled) return;
+      b.disabled = true;
+      b.textContent = 'Menghapus...';
+      $('#delete-product-cancel').disabled = true;
+      $('#delete-product-error').hidden = true;
+      try {
+        await api('/api/seller/products/' + id, { method: 'DELETE' });
+        announceCatalogChange();
+        products = products.filter((p) => p.id !== id);
+        renderProductAdmin();
+        renderProducts();
+        dialog.close();
+        toast('Produk dihapus.');
+      } catch (error) {
+        $('#delete-product-error').textContent = error.message;
+        $('#delete-product-error').hidden = false;
+      } finally {
+        b.disabled = false;
+        b.textContent = 'Hapus produk';
+        $('#delete-product-cancel').disabled = false;
+      }
+    }
     if (b.dataset.editProduct) editProduct(b.dataset.editProduct);
     if (b.id === 'new-product') editProduct();
     if (b.id === 'recover-pending' && pending) {
@@ -889,6 +938,12 @@ document.addEventListener('click', async (event) => {
   } catch (error) {
     toast(error.message);
   }
+});
+$('#delete-product-dialog').addEventListener('cancel', (event) => {
+  if ($('#delete-product-confirm').disabled) event.preventDefault();
+});
+$('#delete-product-dialog').addEventListener('close', () => {
+  delete $('#delete-product-dialog').dataset.productId;
 });
 document.addEventListener('submit', async (event) => {
   const form = event.target;
@@ -918,6 +973,7 @@ document.addEventListener('submit', async (event) => {
           open: v.open === 'on',
         }),
       });
+      announceCatalogChange();
       await bootstrap();
       renderSettings();
     }
@@ -936,6 +992,7 @@ document.addEventListener('submit', async (event) => {
         }),
       });
       $('#product-dialog').close();
+      announceCatalogChange();
       await bootstrap();
       renderProductAdmin();
     }
@@ -1054,3 +1111,89 @@ setInterval(async () => {
   } catch {}
 }, 30000);
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+
+// Cross-device refresh; same-browser tabs also receive an immediate notification.
+const catalogChannel =
+  typeof BroadcastChannel === 'function' ? new BroadcastChannel('hemart-catalog-updates') : null;
+function announceCatalogChange() {
+  catalogChannel?.postMessage('changed');
+}
+let catalogRefreshPending = false;
+let catalogRefreshAgain = false;
+async function refreshCustomerCatalog() {
+  if (sellerPage || document.hidden || navigator.onLine === false) return;
+  if (catalogRefreshPending) {
+    catalogRefreshAgain = true;
+    return;
+  }
+  catalogRefreshPending = true;
+  try {
+    await bootstrap();
+  } catch {
+    // Preserve the current catalog during temporary connection failures.
+  } finally {
+    catalogRefreshPending = false;
+    if (catalogRefreshAgain) {
+      catalogRefreshAgain = false;
+      void refreshCustomerCatalog();
+    }
+  }
+}
+catalogChannel?.addEventListener('message', refreshCustomerCatalog);
+let catalogSocket;
+let reconnectTimer;
+let reconnectDelay = 1000;
+function connectCatalogUpdates() {
+  if (
+    sellerPage ||
+    document.hidden ||
+    navigator.onLine === false ||
+    catalogSocket ||
+    reconnectTimer
+  )
+    return;
+  if (typeof WebSocket !== 'function') return;
+  const url = new URL('/api/catalog/events', location.href);
+  url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const socket = new WebSocket(url);
+  catalogSocket = socket;
+  socket.addEventListener('open', () => {
+    reconnectDelay = 1000;
+    void refreshCustomerCatalog();
+  });
+  socket.addEventListener('message', (event) => {
+    if (event.data === 'catalog-changed') void refreshCustomerCatalog();
+  });
+  socket.addEventListener('error', () => socket.close());
+  socket.addEventListener('close', () => {
+    if (catalogSocket !== socket) return;
+    catalogSocket = null;
+    reconnectTimer = setTimeout(
+      () => {
+        reconnectTimer = null;
+        connectCatalogUpdates();
+      },
+      reconnectDelay + Math.random() * 500,
+    );
+    reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+  });
+}
+function resumeCatalogUpdates() {
+  if (document.hidden || navigator.onLine === false) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+    const socket = catalogSocket;
+    catalogSocket = null;
+    socket?.close();
+    return;
+  }
+  connectCatalogUpdates();
+  void refreshCustomerCatalog();
+}
+document.addEventListener('visibilitychange', resumeCatalogUpdates);
+window.addEventListener('online', resumeCatalogUpdates);
+window.addEventListener('offline', resumeCatalogUpdates);
+connectCatalogUpdates();
+document.addEventListener('visibilitychange', refreshCustomerCatalog);
+window.addEventListener('online', refreshCustomerCatalog);
+window.addEventListener('focus', refreshCustomerCatalog);

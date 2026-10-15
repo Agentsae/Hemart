@@ -36,7 +36,10 @@ export async function protectRequest(request, env) {
   }
   if (request.url.length > 4096)
     return protectionResponse(414, 'Alamat permintaan terlalu panjang.');
-  if (!['GET', 'HEAD', 'POST', 'PUT', 'PATCH'].includes(request.method))
+  if (
+    !['GET', 'HEAD', 'POST', 'PUT', 'PATCH'].includes(request.method) &&
+    !(request.method === 'DELETE' && /^\/api\/seller\/products\/[a-z0-9-]{1,50}$/.test(path))
+  )
     return protectionResponse(405, 'Metode tidak didukung.');
   const maximum = requestBodyLimit(path, request.method);
   if (Number(request.headers.get('Content-Length') || 0) > maximum)

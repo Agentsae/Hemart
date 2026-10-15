@@ -113,3 +113,18 @@ Official references:
 - https://developers.cloudflare.com/workers/wrangler/configuration/
 - https://developers.cloudflare.com/d1/get-started/
 - https://developers.cloudflare.com/workers/configuration/secrets/
+
+## Live catalog updates
+
+Product creation, editing, deletion, and store settings saves notify customer pages over
+`/api/catalog/events`. The `CATALOG_UPDATES` Durable Object binding and
+`catalog-updates-v1` SQLite class migration in `wrangler.json` are deployed with the Worker.
+Only a public invalidation signal is broadcast; customers fetch the current catalog themselves.
+Reconnecting or returning to the app refreshes the catalog. Five-second catalog polling is removed.
+Order-status refresh remains on its existing interval.
+
+Use `npm run deploy` to publish the Worker and its binding. For local WebSocket testing,
+use `npm run cf -- dev` (Wrangler); `npm run dev` is the plain Node server and has no
+Durable Object support. Notification failures are logged without failing an already committed save.
+
+The implementation uses Cloudflare's [WebSocket Hibernation API](https://developers.cloudflare.com/durable-objects/best-practices/websockets/).

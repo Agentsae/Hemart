@@ -65,5 +65,19 @@
         "period": 60
       }
     }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "CATALOG_UPDATES",
+        "class_name": "CatalogUpdates"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "catalog-updates-v1",
+      "new_sqlite_classes": ["CatalogUpdates"]
+    }
   ]
 }

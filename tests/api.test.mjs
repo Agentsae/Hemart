@@ -49,7 +49,7 @@ function setup() {
     );
     return { status: response.status, body: await response.json(), headers: response.headers };
   }
-  return { DB, request };
+  return { DB, request, env };
 }
 const token = () => Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url');
 test('retention deletes only terminal orders older than 30 days and pages surviving history', async () => {
@@ -375,4 +375,96 @@ test('midnight cutoff advances the delivery date at Jakarta midnight', () => {
   assert.equal(schedule(new Date('2026-10-12T17:00:00Z'), 0), '2026-10-14');
   assert.equal(schedule(new Date('2026-12-31T16:59:59Z'), 0), '2027-01-01');
   assert.equal(schedule(new Date('2026-12-31T17:00:00Z'), 0), '2027-01-02');
+});
+
+test('product CRUD persists changes and deletion preserves existing orders', async () => {
+  const { DB, request } = await opened();
+  const product = {
+    name: 'Produk baru',
+    unit: '1 buah',
+    price: 7000,
+    category: 'Buah',
+    image: '/icon.svg',
+    tag: '',
+    available: true,
+  };
+  const path = '/api/seller/products/produk-baru';
+  assert.equal((await request(path, 'PUT', product, { seller: true })).status, 200);
+  assert.equal(
+    (await request('/api/bootstrap')).body.products.find((p) => p.id === 'produk-baru').name,
+    product.name,
+  );
+  assert.equal(
+    (await request(path, 'PUT', { ...product, price: 8000 }, { seller: true })).status,
+    200,
+  );
+  assert.equal(
+    (await request('/api/bootstrap')).body.products.find((p) => p.id === 'produk-baru').price,
+    8000,
+  );
+  assert.equal((await request(path, 'DELETE')).status, 403);
+  assert.equal(
+    (await request(path, 'DELETE', undefined, { seller: true, origin: 'https://evil.test' }))
+      .status,
+    403,
+  );
+  assert.equal((await request(path, 'DELETE', undefined, { seller: true })).status, 200);
+  assert.ok(!(await request('/api/bootstrap')).body.products.some((p) => p.id === 'produk-baru'));
+  assert.equal((await request(path, 'DELETE', undefined, { seller: true })).status, 404);
+  const receiptToken = token();
+  const order = await request('/api/orders', 'POST', payload(), { token: receiptToken });
+  assert.equal(order.status, 201);
+  assert.equal(
+    (await request('/api/seller/products/bayam', 'DELETE', undefined, { seller: true })).status,
+    200,
+  );
+  for (let i = 0; i < 2; i++)
+    assert.ok(!(await request('/api/bootstrap')).body.products.some((p) => p.id === 'bayam'));
+  const receipt = await request('/api/orders/' + order.body.id, 'GET', undefined, {
+    token: receiptToken,
+  });
+  assert.equal(receipt.status, 200);
+  assert.deepEqual(receipt.body.items, order.body.items);
+  assert.notEqual(
+    (await request('/api/orders', 'POST', payload(), { token: token() })).status,
+    201,
+  );
+  DB.sqlite.close();
+});
+
+test('seller writes notify connected customers only after successful saves', async () => {
+  const { DB, request, env } = setup();
+  let notifications = 0;
+  env.CATALOG_UPDATES = {
+    idFromName: (name) => name,
+    get: () => ({
+      fetch: async () => {
+        notifications++;
+        return new Response(null, { status: 204 });
+      },
+    }),
+  };
+  const product = {
+    name: 'Live product',
+    unit: '1 buah',
+    price: 1000,
+    category: 'Buah',
+    available: true,
+  };
+  const path = '/api/seller/products/live';
+  assert.equal((await request(path, 'PUT', product)).status, 403);
+  assert.equal(notifications, 0);
+  assert.equal((await request(path, 'PUT', product, { seller: true })).status, 200);
+  assert.equal(notifications, 1);
+  assert.ok((await request('/api/bootstrap')).body.products.some((p) => p.id === 'live'));
+  assert.equal((await request(path, 'DELETE', undefined, { seller: true })).status, 200);
+  assert.equal(notifications, 2);
+  assert.equal(
+    (await request('/api/seller/settings', 'PUT', defaults, { seller: true })).status,
+    200,
+  );
+  assert.equal(notifications, 3);
+  assert.equal((await request('/api/catalog/events', 'POST', {})).status, 405);
+  assert.equal((await request('/api/catalog/events')).status, 426);
+  DB.sqlite.close();
 });

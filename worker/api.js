@@ -1,3 +1,4 @@
+import { notifyCatalogChange } from './catalog-updates.js';
 import { protectRequest, boundedText, requestBodyLimit } from './security.js';
 import { initialProducts } from './catalog.js';
 import { sellerSession, authEndpoint } from './auth.js';
@@ -82,7 +83,7 @@ async function catalog(db) {
   return [
     ...initialProducts.map((p) => overrides.get(p.id) || { ...p, available: true }),
     ...[...overrides.values()].filter((p) => !initialProducts.some((a) => a.id === p.id)),
-  ];
+  ].filter((p) => !p.deleted);
 }
 function textField(v, label, max, min = 1) {
   if (typeof v !== 'string' || v.trim().length < min || v.trim().length > max)
@@ -184,6 +185,16 @@ export async function handle(request, env, assets = {}) {
   try {
     const rejected = await protectRequest(request, env);
     if (rejected) return rejected;
+    if (path === '/api/catalog/events') {
+      if (request.method !== 'GET') return json({ error: 'Metode tidak didukung.' }, 405);
+      if (request.headers.get('Origin') !== url.origin)
+        return json({ error: 'Asal permintaan tidak diizinkan.' }, 403);
+      if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket')
+        return json({ error: 'WebSocket required' }, 426);
+      if (!env.CATALOG_UPDATES) return json({ error: 'Live updates unavailable' }, 503);
+      const stub = env.CATALOG_UPDATES.get(env.CATALOG_UPDATES.idFromName('catalog'));
+      return stub.fetch(new Request('https://catalog.internal/subscribe', request));
+    }
     if (path === '/seller' || path === '/seller/') {
       if (!['GET', 'HEAD'].includes(request.method))
         return json({ error: 'Metode tidak didukung.' }, 405);
@@ -221,8 +232,7 @@ export async function handle(request, env, assets = {}) {
           'Cache-Control': url.pathname === '/seller' ? 'no-store' : 'no-cache',
           'X-Content-Type-Options': 'nosniff',
           'Referrer-Policy': 'no-referrer',
-          'Content-Security-Policy':
-            "default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https://images.unsplash.com data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'",
+          'Content-Security-Policy': `default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https://images.unsplash.com data:; connect-src 'self' ${url.protocol === 'https:' ? 'wss:' : 'ws:'}//${url.host}; object-src 'none'; base-uri 'self'; form-action 'self'`,
         },
       });
     }
@@ -411,9 +421,24 @@ export async function handle(request, env, assets = {}) {
         )
         .bind(JSON.stringify(s))
         .run();
+      await notifyCatalogChange(env);
       return json(s);
     }
     const productMatch = path.match(/^\/api\/seller\/products\/([a-z0-9-]+)$/);
+    if (productMatch && request.method === 'DELETE') {
+      const id = productMatch[1];
+      if (!(await catalog(db)).some((p) => p.id === id)) fail('Produk tidak ditemukan.', 404);
+      // Keep a tombstone so built-in products do not reappear on the next catalog load.
+      // Existing order snapshots and their image assets remain intact.
+      await db
+        .prepare(
+          'INSERT INTO products(id,data) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data',
+        )
+        .bind(id, JSON.stringify({ id, deleted: true }))
+        .run();
+      await notifyCatalogChange(env);
+      return json({ ok: true });
+    }
     if (productMatch && request.method === 'PUT') {
       const input = await body(request);
       const p = validateProduct(input, productMatch[1]);
@@ -452,6 +477,7 @@ export async function handle(request, env, assets = {}) {
         )
         .bind(p.id, JSON.stringify(p))
         .run();
+      await notifyCatalogChange(env);
       return json(p);
     }
     const match = path.match(/^\/api\/(seller\/)?orders\/(HM-[A-F0-9-]+)$/);

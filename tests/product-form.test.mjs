@@ -6,7 +6,7 @@ import { runInNewContext } from 'node:vm';
 test('product submit saves and refreshes catalog even when a named input shadows form.id', async () => {
   const source = await readFile('public/app.js', 'utf8');
   const start = source.indexOf("document.addEventListener('submit', async (event) => {");
-  const end = source.indexOf("\n});", start) + 4;
+  const end = source.indexOf('\n});', start) + 4;
   let submit;
   const calls = [];
   const button = { disabled: false };
@@ -38,6 +38,7 @@ test('product submit saves and refreshes catalog even when a named input shadows
     $: (selector) =>
       selector === '#product-photo' ? { files: [] } : { close: () => calls.push('close') },
     api: async (path, options) => calls.push({ path, body: JSON.parse(options.body) }),
+    announceCatalogChange: () => {},
     bootstrap: async () => calls.push('refresh'),
     renderProductAdmin: () => calls.push('render'),
     toast: (message) => calls.push(message),
