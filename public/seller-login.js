@@ -1,5 +1,23 @@
 const form = document.querySelector('#seller-login-form'),
   error = document.querySelector('#login-error');
+const installButton = document.querySelector('#seller-install');
+let installPrompt;
+window.addEventListener('beforeinstallprompt', (event) => {
+  event.preventDefault();
+  installPrompt = event;
+  installButton.hidden = false;
+});
+installButton.addEventListener('click', async () => {
+  if (!installPrompt) return;
+  await installPrompt.prompt();
+  installPrompt = null;
+  installButton.hidden = true;
+});
+window.addEventListener('appinstalled', () => {
+  installPrompt = null;
+  installButton.hidden = true;
+});
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
   const button = form.querySelector('button');

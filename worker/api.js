@@ -207,21 +207,24 @@ export async function handle(request, env, assets = {}) {
         return json({ error: 'Metode tidak didukung.' }, 405);
       const asset = assets[path];
       if (!asset) return json({ error: 'Tidak ditemukan.' }, 404);
-      return new Response(
-        request.method === 'HEAD'
-          ? null
-          : Uint8Array.from(atob(asset.data), (c) => c.charCodeAt(0)),
-        {
-          headers: {
-            'Content-Type': asset.type,
-            'Cache-Control': 'no-cache',
-            'X-Content-Type-Options': 'nosniff',
-            'Referrer-Policy': 'no-referrer',
-            'Content-Security-Policy':
-              "default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https://images.unsplash.com data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'",
-          },
+      let content = Uint8Array.from(atob(asset.data), (c) => c.charCodeAt(0));
+      if (url.pathname === '/seller') {
+        content = new TextEncoder().encode(
+          new TextDecoder()
+            .decode(content)
+            .replace('href="/manifest.webmanifest"', 'href="/seller.webmanifest"'),
+        );
+      }
+      return new Response(request.method === 'HEAD' ? null : content, {
+        headers: {
+          'Content-Type': asset.type,
+          'Cache-Control': url.pathname === '/seller' ? 'no-store' : 'no-cache',
+          'X-Content-Type-Options': 'nosniff',
+          'Referrer-Policy': 'no-referrer',
+          'Content-Security-Policy':
+            "default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https://images.unsplash.com data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'",
         },
-      );
+      });
     }
     if (!env.DB) fail('Penyimpanan belum siap. Silakan coba lagi.', 503);
     const imageMatch = path.match(/^\/api\/images\/([a-f0-9]{64})$/);

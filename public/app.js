@@ -5,6 +5,8 @@ if (sellerPage) {
   document.title = 'Hemart — Dashboard Penjual';
   $('nav').hidden = true;
   $('.header-actions').hidden = true;
+  $('#install').textContent = 'Pasang Hemart Seller';
+  $('header').append($('#install'));
   $('#shop-page').hidden = true;
   $('#seller-page').hidden = false;
   const back = document.createElement('a');

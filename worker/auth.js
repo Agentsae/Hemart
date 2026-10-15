@@ -1,5 +1,6 @@
 import { boundedText } from './security.js';
 const SESSION_SECONDS = 7 * 24 * 60 * 60;
+const MAX_SELLER_SESSIONS = 3;
 const encoder = new TextEncoder();
 const hex = (bytes) =>
   [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -135,6 +136,7 @@ export async function authEndpoint(request, env, path) {
     .replace(/\+/g, '-')
     .replace(/\//g, '_')
     .replace(/=+$/, '');
+  const version = await credentialVersion(env);
   const old = readSession(request, env);
   if (old)
     await env.DB.prepare('DELETE FROM seller_sessions WHERE token_hash=?')
@@ -142,11 +144,31 @@ export async function authEndpoint(request, env, path) {
       .run();
   await env.DB.prepare('DELETE FROM seller_sessions WHERE expires_at<=?').bind(now).run();
   await env.DB.prepare('DELETE FROM rate_limits WHERE expires_at<=?').bind(now).run();
-  await env.DB.prepare(
-    'INSERT INTO seller_sessions(token_hash,credential_version,expires_at) VALUES(?,?,?)',
+  // Count and insert in one statement so simultaneous logins cannot exceed the limit.
+  const created = await env.DB.prepare(
+    `INSERT INTO seller_sessions(token_hash,credential_version,expires_at)
+     SELECT ?,?,? WHERE (
+       SELECT COUNT(*) FROM seller_sessions
+       WHERE credential_version=? AND expires_at>?
+     ) < ? RETURNING token_hash`,
   )
-    .bind(await digest(value), await credentialVersion(env), now + SESSION_SECONDS * 1000)
-    .run();
+    .bind(
+      await digest(value),
+      version,
+      now + SESSION_SECONDS * 1000,
+      version,
+      now,
+      MAX_SELLER_SESSIONS,
+    )
+    .first();
+  if (!created)
+    return authJSON(
+      {
+        error:
+          'Maksimal 3 perangkat penjual dapat masuk bersamaan. Keluar dari perangkat lain atau tunggu sesi berakhir.',
+      },
+      409,
+    );
   return authJSON({ ok: true }, 200, {
     'Set-Cookie': sessionCookie(request, env, value, SESSION_SECONDS),
   });

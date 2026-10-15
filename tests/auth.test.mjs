@@ -130,3 +130,80 @@ test('new login rotates old session and password hashes use distinct salts', asy
   );
   assert.notEqual(await passwordHash(password), encoded);
 });
+
+test('seller login allows three active sessions and frees a slot on logout', async () => {
+  const env = setup();
+  const cookies = await Promise.all([login(env), login(env), login(env)]);
+  const fourth = await handle(req('/api/auth/login', { username: 'bapak', password }), env);
+  assert.equal(fourth.status, 409);
+  assert.match((await fourth.json()).error, /Maksimal 3 perangkat/);
+  for (const cookie of cookies) {
+    const response = await handle(
+      new Request(origin + '/api/seller/orders', { headers: { Cookie: cookie } }),
+      env,
+    );
+    assert.equal(response.status, 200);
+  }
+  assert.equal((await handle(req('/api/auth/logout', {}, cookies[0]), env)).status, 200);
+  assert.ok(await login(env));
+  assert.equal(
+    (await env.DB.prepare('SELECT COUNT(*) AS count FROM seller_sessions').first()).count,
+    3,
+  );
+  env.DB.sqlite.close();
+});
+
+test('simultaneous seller logins cannot exceed three active sessions', async () => {
+  const env = setup();
+  const attempts = await Promise.all(
+    Array.from({ length: 4 }, () =>
+      handle(req('/api/auth/login', { username: 'bapak', password }), env),
+    ),
+  );
+  assert.deepEqual(attempts.map((response) => response.status).sort(), [200, 200, 200, 409]);
+  assert.equal(
+    (await env.DB.prepare('SELECT COUNT(*) AS count FROM seller_sessions').first()).count,
+    3,
+  );
+  env.DB.sqlite.close();
+});
+
+test('seller pages advertise a separate app while toko retains its manifest', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const env = setup();
+  const cookie = await login(env);
+  const pageAssets = {};
+  for (const [path, file] of Object.entries({
+    '/': 'index.html',
+    '/seller-login.html': 'seller-login.html',
+    '/seller.webmanifest': 'seller.webmanifest',
+  })) {
+    pageAssets[path] = {
+      type: file.endsWith('webmanifest') ? 'application/manifest+json' : 'text/html',
+      data: (await readFile('public/' + file)).toString('base64'),
+    };
+  }
+  for (const path of ['/seller', '/seller/login', '/']) {
+    const response = await handle(
+      new Request(origin + path, { headers: { Cookie: cookie } }),
+      env,
+      pageAssets,
+    );
+    assert.equal(response.status, 200);
+    const html = await response.text();
+    assert.ok(
+      html.includes(path === '/' ? 'href="/manifest.webmanifest"' : 'href="/seller.webmanifest"'),
+    );
+    if (path === '/seller') assert.equal(response.headers.get('Cache-Control'), 'no-store');
+  }
+  const manifest = await (
+    await handle(new Request(origin + '/seller.webmanifest'), env, pageAssets)
+  ).json();
+  assert.equal(manifest.id, '/seller');
+  assert.equal(manifest.start_url, '/seller');
+  assert.equal(manifest.scope, '/seller');
+  assert.equal(manifest.display, 'standalone');
+  const signedOut = await handle(new Request(origin + manifest.start_url), env, pageAssets);
+  assert.equal(signedOut.headers.get('Location'), '/seller/login');
+  env.DB.sqlite.close();
+});
