@@ -69,6 +69,7 @@ let products = [],
   sellerHasMore = false,
   category = 'Semua',
   query = '',
+  sellerQuery = '',
   page = 'shop',
   sellerMode = 'orders',
   filterDate = '',
@@ -173,10 +174,17 @@ function renderCategories() {
     )
     .join('');
 }
+function matchesProduct(product, search) {
+  const text = [product.name, product.category, product.unit, product.tag].join(' ').toLowerCase();
+  return search
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .every((word) => text.includes(word));
+}
 function renderProducts() {
   const list = products.filter(
-    (p) =>
-      (category === 'Semua' || p.category === category) && p.name.toLowerCase().includes(query),
+    (p) => (category === 'Semua' || p.category === category) && matchesProduct(p, query),
   );
   $('#products').innerHTML = list
     .map(
@@ -555,13 +563,25 @@ function renderProductAdmin() {
       <h2>Katalog & harga</h2>
       <button class="primary" id="new-product">Tambah produk</button>
     </div>
+    <label class="search">
+      <span aria-hidden="true">&#x2315;</span>
+      <input id="seller-product-search" type="search" placeholder="Cari nama, kategori, atau satuan..."
+        aria-label="Cari produk penjual" value="${esc(sellerQuery)}" />
+    </label>
+    <p id="seller-product-count" class="muted" role="status"></p>
     <p class="notice">
       Periksa harga awal sebelum membuka pemesanan. Pesanan lama menyimpan harga saat checkout.
     </p>
-    <div class="admin-products">
-      ${products
-        .map(
-          (p) => /* HTML */ `<article class="order-card">
+    <div id="seller-product-list" class="admin-products"></div>`;
+  renderSellerProducts();
+}
+function renderSellerProducts() {
+  const list = products.filter((p) => matchesProduct(p, sellerQuery));
+  $('#seller-product-count').textContent = `${list.length} dari ${products.length} produk`;
+  $('#seller-product-list').innerHTML =
+    list
+      .map(
+        (p) => /* HTML */ `<article class="order-card">
               <h3>${esc(p.name)}</h3>
               <p>
                 ${esc(p.unit)}<br /><b>${money(p.price)}</b> ·
@@ -569,9 +589,8 @@ function renderProductAdmin() {
               </p>
               <button class="secondary" data-edit-product="${p.id}">Ubah produk</button>
             </article>`,
-        )
-        .join('')}
-    </div>`;
+      )
+      .join('') || '<div class="empty">Tidak ada produk yang cocok. Coba kata kunci lain.</div>';
 }
 async function prepareProductPhoto(file) {
   if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type))
@@ -873,9 +892,10 @@ document.addEventListener('click', async (event) => {
 });
 document.addEventListener('submit', async (event) => {
   const form = event.target;
-  if (!['checkout-form', 'settings-form', 'product-form', 'quote-form'].includes(form.id)) return;
+  const formId = form.getAttribute('id');
+  if (!['checkout-form', 'settings-form', 'product-form', 'quote-form'].includes(formId)) return;
   event.preventDefault();
-  if (form.id === 'checkout-form') {
+  if (formId === 'checkout-form') {
     await submitOrder(form);
     return;
   }
@@ -883,7 +903,7 @@ document.addEventListener('submit', async (event) => {
   button.disabled = true;
   try {
     const v = Object.fromEntries(new FormData(form));
-    if (form.id === 'settings-form') {
+    if (formId === 'settings-form') {
       await api('/api/seller/settings', {
         method: 'PUT',
         body: JSON.stringify({
@@ -901,7 +921,7 @@ document.addEventListener('submit', async (event) => {
       await bootstrap();
       renderSettings();
     }
-    if (form.id === 'product-form') {
+    if (formId === 'product-form') {
       const id = v.id || 'produk-' + crypto.randomUUID().slice(0, 8);
       const file = $('#product-photo').files[0];
       const imageUpload = file ? await prepareProductPhoto(file) : undefined;
@@ -919,7 +939,7 @@ document.addEventListener('submit', async (event) => {
       await bootstrap();
       renderProductAdmin();
     }
-    if (form.id === 'quote-form') {
+    if (formId === 'quote-form') {
       const o = sellerOrders.find((o) => o.id === form.dataset.id);
       await api('/api/seller/orders/' + o.id, {
         method: 'PATCH',
@@ -943,6 +963,12 @@ document.addEventListener('submit', async (event) => {
 $('#search').addEventListener('input', (e) => {
   query = e.target.value.trim().toLowerCase();
   renderProducts();
+});
+document.addEventListener('input', (e) => {
+  if (e.target.id === 'seller-product-search') {
+    sellerQuery = e.target.value;
+    renderSellerProducts();
+  }
 });
 document.addEventListener('change', (e) => {
   if (e.target.id === 'seller-date') {

@@ -402,8 +402,9 @@ h1 em {
   border: 0;
   background: none;
   width: 100%;
+  min-width: 0;
   outline: none;
-  font-size: 12px;
+  font-size: 16px;
   color: var(--dark);
 }
 .search:focus-within {
